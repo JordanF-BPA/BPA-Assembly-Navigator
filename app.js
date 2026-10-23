@@ -52,7 +52,15 @@ const incomingGuid = rawIncomingGuid
   .toLowerCase();
 
 let autoNavigationPending = validGuid(incomingGuid);
+
 let autoNavigationRunning = false;
+
+// Automatic navigation retry settings
+const AUTO_NAVIGATION_MAX_ATTEMPTS = 15;
+const AUTO_NAVIGATION_RETRY_DELAY = 2000;
+
+const delay = milliseconds =>
+  new Promise(resolve => setTimeout(resolve, milliseconds));
 
 // Diagnostic information for Stage 2D.3B
 console.log('BPA Navigator - URL:', window.location.href);
@@ -307,34 +315,10 @@ async function findAssembly() {
 // STAGE 2D.3B - AUTOMATIC ASSEMBLY NAVIGATION
 // ============================================================
 
+
 async function attemptAutoNavigation() {
 
-  // Prevent duplicate automatic requests.
-
-  if (!autoNavigationPending ||
-      autoNavigationRunning) {
-
-    return;
-  }
-
-  // Viewer must be connected.
-
-  if (!api) {
-
-    return;
-  }
-
-  const modelSelect = el('model');
-
-  // Ensure at least one model is available.
-
-  if (!modelSelect ||
-      modelSelect.options.length === 0) {
-
-    status(
-      'Automatic navigation is waiting for a loaded IFC model.'
-    );
-
+  if (!autoNavigationPending || autoNavigationRunning || !api) {
     return;
   }
 
@@ -342,52 +326,104 @@ async function attemptAutoNavigation() {
 
   try {
 
-    // Populate GUID input automatically.
-
     el('guid').value = incomingGuid;
 
-    status(
-      'Automatically locating assembly: ' +
-      incomingGuid
-    );
+    for (
+      let attempt = 1;
+      attempt <= AUTO_NAVIGATION_MAX_ATTEMPTS;
+      attempt++
+    ) {
 
-    log('Automatic navigation started', {
-      teklaGuid: incomingGuid,
-      modelId: modelSelect.value
-    });
+      status(
+        'Automatically locating assembly. Attempt ' +
+        attempt + ' of ' + AUTO_NAVIGATION_MAX_ATTEMPTS
+      );
 
-    // ========================================================
-    // REUSE EXISTING WORKING FUNCTION
-    // ========================================================
+      try {
 
-    await findAssembly();
+        // Refresh available models.
+        const models = await api.viewer.getModels();
 
-    // Mark automatic navigation as completed.
+        const modelSelect = el('model');
 
-    autoNavigationPending = false;
+        // Preserve the selected model ID where possible.
+        const previousModelId = modelSelect.value;
 
-    log('Automatic GUID navigation completed', {
-      teklaGuid: incomingGuid,
-      modelId: modelSelect.value
-    });
+        modelSelect.replaceChildren();
+
+        for (const model of models || []) {
+
+          const modelId =
+            model.id || model.modelId || model.versionId;
+
+          if (!modelId) {
+            continue;
+          }
+
+          const option = document.createElement('option');
+
+          option.value = modelId;
+          option.textContent =
+            (model.name || model.fileName || modelId) +
+            ' (' + modelId + ')';
+
+          modelSelect.appendChild(option);
+        }
+
+        if (
+          previousModelId &&
+          Array.from(modelSelect.options).some(
+            option => option.value === previousModelId
+          )
+        ) {
+          modelSelect.value = previousModelId;
+        }
+
+        if (!modelSelect.value) {
+          throw new Error('No IFC model available yet.');
+        }
+
+        // Reuse the previously tested working function.
+        await findAssembly();
+
+        autoNavigationPending = false;
+
+        status('Automatic assembly navigation completed.');
+
+        log('Automatic navigation successful', {
+          teklaGuid: incomingGuid,
+          modelId: modelSelect.value,
+          attempt
+        });
+
+        return;
+
+      }
+      catch (error) {
+
+        log('Automatic navigation retry', {
+          attempt,
+          error: error.message
+        });
+
+        if (attempt === AUTO_NAVIGATION_MAX_ATTEMPTS) {
+          throw error;
+        }
+
+        await delay(AUTO_NAVIGATION_RETRY_DELAY);
+      }
+    }
 
   }
   catch (error) {
 
-    status(
-      'Automatic navigation could not complete: ' +
-      error.message
-    );
-
-    log(
-      'Automatic navigation error',
-      String(error)
-    );
-
-    // Stop automatic retries.
-    // Manual Find, Select & Zoom remains available.
-
     autoNavigationPending = false;
+
+    status(
+      'Automatic navigation failed: ' + error.message
+    );
+
+    log('Automatic navigation failed', String(error));
 
   }
   finally {
