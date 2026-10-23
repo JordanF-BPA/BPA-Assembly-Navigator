@@ -1,6 +1,6 @@
 {
   "title": "BPA Assembly Navigator",
   "description": "Select and zoom to Tekla assemblies in the existing Trimble Connect 3D viewer.",
-  "url": "https://YOUR-HOST/TrimbleConnectExtension/index.html",
+  "url": "https://jordanf-bpa.github.io/BPA-Assembly-Navigator/",
   "extensionType": ["3dviewer"]
 }
