@@ -29,7 +29,7 @@ let api = null;
 const el = id => document.getElementById(id);
 
 const validGuid = value =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 
 
@@ -37,26 +37,29 @@ const validGuid = value =>
  // STAGE 2D.3B - AUTOMATIC NAVIGATION PARAMETERS
  // ============================================================
 
- const navigationParams = new URLSearchParams(
-   window.location.search
- );
 
- // Read the GUID supplied through the extension URL.
- const rawIncomingGuid =
-   navigationParams.get('teklaGuid') || '';
+const navigationParams = new URLSearchParams(
+  window.location.search
+);
 
- // Remove surrounding quotes, braces and whitespace.
- const incomingGuid = rawIncomingGuid
-   .trim()
-   .replace(/^["'{\s]+|["'}\s]+$/g, '')
-   .trim()
-   .toLowerCase();
+const rawIncomingGuid =
+  navigationParams.get('teklaGuid') || '';
 
- // Check whether the cleaned GUID is valid.
- let autoNavigationPending = validGuid(incomingGuid);
+const incomingGuid = rawIncomingGuid
+  .trim()
+  .replace(/^["'{\s]+|["'}\s]+$/g, '')
+  .trim()
+  .toLowerCase();
 
- let autoNavigationRunning = false;
+let autoNavigationPending = validGuid(incomingGuid);
+let autoNavigationRunning = false;
 
+// Diagnostic information for Stage 2D.3B
+console.log('BPA Navigator - URL:', window.location.href);
+console.log('BPA Navigator - Raw GUID:', JSON.stringify(rawIncomingGuid));
+console.log('BPA Navigator - Cleaned GUID:', JSON.stringify(incomingGuid));
+console.log('BPA Navigator - GUID length:', incomingGuid.length);
+console.log('BPA Navigator - GUID valid:', validGuid(incomingGuid));
 
 
 // ============================================================
