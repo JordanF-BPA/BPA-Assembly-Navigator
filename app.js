@@ -32,21 +32,31 @@ const validGuid = value =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 
-// ============================================================
-// STAGE 2D.3B - AUTOMATIC NAVIGATION PARAMETERS
-// ============================================================
 
-const navigationParams = new URLSearchParams(
-  window.location.search
-);
+ // ============================================================
+ // STAGE 2D.3B - AUTOMATIC NAVIGATION PARAMETERS
+ // ============================================================
 
-const incomingGuid = (
-  navigationParams.get('teklaGuid') || ''
-).trim().toLowerCase();
+ const navigationParams = new URLSearchParams(
+   window.location.search
+ );
 
-let autoNavigationPending = validGuid(incomingGuid);
+ // Read the GUID supplied through the extension URL.
+ const rawIncomingGuid =
+   navigationParams.get('teklaGuid') || '';
 
-let autoNavigationRunning = false;
+ // Remove surrounding quotes, braces and whitespace.
+ const incomingGuid = rawIncomingGuid
+   .trim()
+   .replace(/^["'{\s]+|["'}\s]+$/g, '')
+   .trim()
+   .toLowerCase();
+
+ // Check whether the cleaned GUID is valid.
+ let autoNavigationPending = validGuid(incomingGuid);
+
+ let autoNavigationRunning = false;
+
 
 
 // ============================================================
@@ -431,15 +441,18 @@ if (incomingGuid) {
     run(connect)();
 
   }
-  else {
+else {
 
-    status(
-      'Invalid assembly GUID in navigation URL.'
-    );
+  status(
+    'Invalid assembly GUID in navigation URL.'
+  );
 
-    log(
-      'Invalid navigation GUID',
-      incomingGuid
-    );
-  }
+  log('Invalid navigation GUID', {
+    rawGuid: rawIncomingGuid,
+    cleanedGuid: incomingGuid,
+    guidLength: incomingGuid.length,
+    isValid: validGuid(incomingGuid),
+    fullUrl: window.location.href
+  });
+}
 }
