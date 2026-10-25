@@ -170,18 +170,34 @@ async function connect() {
 
   if (!api) {
 
-    api = await window.TrimbleConnectWorkspace.connect(
-      window.parent,
-      (event, data) => {
+   api = await window.TrimbleConnectWorkspace.connect(
+  window.parent,
+  (event, data) => {
 
-        if (event === 'viewer.onSelectionChanged') {
+    if (event === 'viewer.onSelectionChanged') {
 
-          log('Viewer selection changed', data);
-        }
+      log('Viewer selection changed', data);
+    }
 
-      },
-      30000
-    );
+    // ======================================================
+    // STAGE 2D.3B.5 - NATIVE GHOST MODE CHANGE DETECTION
+    // ======================================================
+
+    if (event === 'viewer.onPresentationChanged') {
+
+      log('Viewer presentation changed', data);
+
+      // Read the native Ghost Mode state whenever
+      // Trimble Connect reports a presentation change.
+
+      tryInspectNativeGhostMode(
+        'Native presentation changed'
+      );
+    }
+
+  },
+  30000
+);
   }
 
   const project = await api.project.getProject();
@@ -451,21 +467,37 @@ async function findAssembly() {
     'After selection and zoom'
   );
 
-  // ==========================================================
-  // NAVIGATION COMPLETE
-  // ==========================================================
+// ==========================================================
+// STAGE 2D.3B.5 - NAVIGATION COMPLETE
+// ==========================================================
+
+const nativeGhostState =
+  await tryInspectNativeGhostMode(
+    'Navigation completed'
+  );
+
+if (nativeGhostState === true) {
 
   status(
     'Assembly isolated, highlighted and zoomed. ' +
-    'Use Trimble Connect toolbar to toggle native Ghost Mode.'
+    'Native Ghost Mode is ON.'
   );
 
-  log('Assembly navigation completed', {
-    modelId,
-    guid,
-    runtimeId: id
-  });
+} else {
+
+  status(
+    'Assembly isolated, highlighted and zoomed. ' +
+    'Enable Ghost Mode in the Trimble Connect toolbar ' +
+    'to display transparent surrounding steelwork.'
+  );
 }
+
+log('Assembly navigation completed', {
+  modelId,
+  guid,
+  runtimeId: id,
+  nativeGhostState
+});
 
 
 // ============================================================
