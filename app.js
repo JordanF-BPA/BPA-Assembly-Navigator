@@ -390,6 +390,7 @@ if (isolated !== true) {
   );
 
 
+
   // ==========================================================
   // ZOOM CAMERA
   // ==========================================================
@@ -398,17 +399,37 @@ if (isolated !== true) {
 
   await api.viewer.setCamera(selector);
 
+  // ==========================================================
+  // STAGE 2D.3B.3A - APPLY GHOST MODE LAST
+  // ==========================================================
+
+  if (ghostModeEnabled) {
+
+    status('Applying Ghost Mode after isolation...');
+
+    await applyGhostMode(selector);
+
+    // Reapply the assembly selection after changing
+    // the surrounding object appearance.
+    await api.viewer.setSelection(
+      selector,
+      'set'
+    );
+
+    log('Ghost Mode applied after isolation and zoom');
+  }
+
   status(
-    'Selection and camera commands completed. ' +
-    'Confirm the assembly is highlighted and visible.'
+    'Assembly isolated, highlighted and zoomed. ' +
+    'Ghost Mode: ' + (ghostModeEnabled ? 'ON' : 'OFF')
   );
 
-  log('Selected and zoomed', {
+  log('Assembly navigation completed', {
     modelId,
     guid,
-    runtimeId: id
+    runtimeId: id,
+    ghostModeEnabled
   });
-}
 
 
 // ============================================================
