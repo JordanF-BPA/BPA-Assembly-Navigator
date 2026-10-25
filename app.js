@@ -1,22 +1,23 @@
 
 /*
  * BPA Assembly Navigator
- * Stage 2D.3B.4 - Native Ghost Mode Diagnostics
+ * Stage 2D.3B.6 - Ghost Mode Sequence Control
  *
- * Functionality:
- * - Connect to Trimble Connect viewer
+ * Features:
+ * - Connect to Trimble Connect
  * - Read selected objects
- * - Resolve Tekla assembly GUID to runtime ID
+ * - Resolve Tekla assembly GUID
  * - Show Only Selected Objects
- * - Highlight selected assembly
- * - Zoom camera to selected assembly
- * - Automatically receive GUID from extension URL
- * - Automatically connect and navigate
- * - Retry navigation while IFC model loads
- * - Read native Trimble Connect Ghost Mode state
+ * - Check native Ghost Mode before isolation
+ * - Request native Ghost Mode after isolation
+ * - Highlight and zoom to assembly
+ * - Automatic URL GUID navigation
+ * - Model loading retry
+ * - Native Ghost Mode diagnostics
+ * - Live presentation change detection
  *
- * Ghost Mode is diagnostic-only in this stage.
- * No access tokens or credentials are stored.
+ * Native Ghost Mode is controlled through the
+ * Trimble Connect toolbar during this stage.
  */
 
 'use strict';
@@ -26,14 +27,12 @@
 // ============================================================
 
 let api = null;
-
 let lastAssemblySelector = null;
 
 const el = id => document.getElementById(id);
 
 const validGuid = value =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-
 
 // ============================================================
 // AUTOMATIC NAVIGATION PARAMETERS
@@ -53,7 +52,6 @@ const incomingGuid = rawIncomingGuid
   .toLowerCase();
 
 let autoNavigationPending = validGuid(incomingGuid);
-
 let autoNavigationRunning = false;
 
 const AUTO_NAVIGATION_MAX_ATTEMPTS = 15;
@@ -61,13 +59,6 @@ const AUTO_NAVIGATION_RETRY_DELAY = 2000;
 
 const delay = milliseconds =>
   new Promise(resolve => setTimeout(resolve, milliseconds));
-
-console.log('BPA Navigator - URL:', window.location.href);
-console.log('BPA Navigator - Raw GUID:', JSON.stringify(rawIncomingGuid));
-console.log('BPA Navigator - Cleaned GUID:', JSON.stringify(incomingGuid));
-console.log('BPA Navigator - GUID length:', incomingGuid.length);
-console.log('BPA Navigator - GUID valid:', validGuid(incomingGuid));
-
 
 // ============================================================
 // LOGGING AND STATUS
@@ -94,16 +85,13 @@ const run = fn => async () => {
     await fn();
   }
   catch (error) {
-
     status('Error: ' + error.message);
-
     log('ERROR', String(error));
   }
 };
 
-
 // ============================================================
-// STAGE 2D.3B.4 - NATIVE GHOST MODE DIAGNOSTICS
+// NATIVE GHOST MODE DIAGNOSTICS
 // ============================================================
 
 async function inspectNativeGhostMode(
@@ -114,44 +102,38 @@ async function inspectNativeGhostMode(
     throw new Error('Connect to Trimble Connect first.');
   }
 
-  status('Reading native viewer presentation...');
-
   const presentation =
     await api.viewer.getPresentation();
 
   const ghostState = presentation?.ghost;
 
   log('Native Ghost Mode diagnostics', {
-    label: label,
+    label,
     ghost: ghostState ?? 'Not reported',
-    transparent:
-      presentation?.transparent ?? 'Not reported',
-    transparencyLevel:
-      presentation?.transparencyLevel ?? 'Not reported',
     fullPresentation: presentation
   });
 
-  if (typeof ghostState === 'boolean') {
-
-    el('ghostMode').checked = ghostState;
-
-  } else {
-
-    el('ghostMode').checked = false;
-  }
-
-  status(
-    'Native Ghost Mode: ' +
-    (ghostState === true
-      ? 'ON'
-      : ghostState === false
-        ? 'OFF'
-        : 'Not reported')
-  );
+  el('ghostMode').checked =
+    ghostState === true;
 
   return ghostState;
 }
 
+async function tryInspectNativeGhostMode(label) {
+
+  try {
+    return await inspectNativeGhostMode(label);
+  }
+  catch (error) {
+
+    log('Native Ghost Mode diagnostic failed', {
+      label,
+      error: error.message
+    });
+
+    return undefined;
+  }
+}
 
 // ============================================================
 // CONNECT TO TRIMBLE CONNECT VIEWER
@@ -162,7 +144,6 @@ async function connect() {
   status('Connecting to Trimble Connect viewer...');
 
   if (!window.TrimbleConnectWorkspace) {
-
     throw new Error(
       'Trimble Workspace API script did not load.'
     );
@@ -170,34 +151,26 @@ async function connect() {
 
   if (!api) {
 
-   api = await window.TrimbleConnectWorkspace.connect(
-  window.parent,
-  (event, data) => {
+    api = await window.TrimbleConnectWorkspace.connect(
+      window.parent,
+      (event, data) => {
 
-    if (event === 'viewer.onSelectionChanged') {
+        if (event === 'viewer.onSelectionChanged') {
+          log('Viewer selection changed', data);
+        }
 
-      log('Viewer selection changed', data);
-    }
+        if (event === 'viewer.onPresentationChanged') {
 
-    // ======================================================
-    // STAGE 2D.3B.5 - NATIVE GHOST MODE CHANGE DETECTION
-    // ======================================================
+          log('Viewer presentation changed', data);
 
-    if (event === 'viewer.onPresentationChanged') {
+          tryInspectNativeGhostMode(
+            'Native presentation changed'
+          );
+        }
 
-      log('Viewer presentation changed', data);
-
-      // Read the native Ghost Mode state whenever
-      // Trimble Connect reports a presentation change.
-
-      tryInspectNativeGhostMode(
-        'Native presentation changed'
-      );
-    }
-
-  },
-  30000
-);
+      },
+      30000
+    );
   }
 
   const project = await api.project.getProject();
@@ -207,14 +180,9 @@ async function connect() {
     name: project?.name
   });
 
-  // ==========================================================
-  // READ AVAILABLE MODELS
-  // ==========================================================
-
   const models = await api.viewer.getModels();
 
   const select = el('model');
-
   const previousModelId = select.value;
 
   select.replaceChildren();
@@ -226,9 +194,7 @@ async function connect() {
       model.modelId ||
       model.versionId;
 
-    if (!id) {
-      continue;
-    }
+    if (!id) continue;
 
     const option = document.createElement('option');
 
@@ -250,39 +216,18 @@ async function connect() {
     select.value = previousModelId;
   }
 
-  log(
-    'Available models (inspect identifiers and loading state)',
-    models
+  log('Available models', models);
+
+  await tryInspectNativeGhostMode(
+    'After connection'
   );
 
   status('Connected to Trimble Connect viewer.');
 
-  // Read the native Ghost Mode state on connection.
-  // Diagnostic failure must not block navigation.
-
-  try {
-
-    await inspectNativeGhostMode('After connection');
-
-  }
-  catch (error) {
-
-    log(
-      'Ghost Mode diagnostic unavailable on connection',
-      error.message
-    );
-  }
-
-  // ==========================================================
-  // ATTEMPT AUTOMATIC NAVIGATION
-  // ==========================================================
-
   if (autoNavigationPending) {
-
     await attemptAutoNavigation();
   }
 }
-
 
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
@@ -294,44 +239,16 @@ async function readSelected() {
     throw new Error('Connect first.');
   }
 
-  const selection = await api.viewer.getSelection();
+  const selection =
+    await api.viewer.getSelection();
 
-  log(
-    'Current selection (modelId and objectRuntimeIds)',
-    selection
-  );
+  log('Current viewer selection', selection);
 
-  status(
-    'Selection read. Check diagnostics for model and runtime IDs.'
-  );
+  status('Selection read.');
 }
 
-
 // ============================================================
-// SAFE NATIVE GHOST MODE DIAGNOSTICS
-// ============================================================
-
-async function tryInspectNativeGhostMode(label) {
-
-  try {
-
-    return await inspectNativeGhostMode(label);
-
-  }
-  catch (error) {
-
-    log('Native Ghost Mode diagnostic failed', {
-      label,
-      error: error.message
-    });
-
-    return undefined;
-  }
-}
-
-
-// ============================================================
-// FIND, ISOLATE, SELECT AND ZOOM TO ASSEMBLY
+// FIND, ISOLATE, SELECT AND ZOOM
 // ============================================================
 
 async function findAssembly() {
@@ -340,10 +257,10 @@ async function findAssembly() {
     throw new Error('Connect first.');
   }
 
-  const guid = el('guid').value.trim().toLowerCase();
+  const guid =
+    el('guid').value.trim().toLowerCase();
 
   if (!validGuid(guid)) {
-
     throw new Error(
       'Enter a valid 36-character Tekla assembly GUID.'
     );
@@ -352,14 +269,13 @@ async function findAssembly() {
   const modelId = el('model').value;
 
   if (!modelId) {
-
     throw new Error(
       'Choose a model. Open the IFC in the 3D viewer first.'
     );
   }
 
   // ==========================================================
-  // RESOLVE GUID TO RUNTIME ID
+  // RESOLVE GUID
   // ==========================================================
 
   status('Resolving IFC object GUID...');
@@ -379,10 +295,8 @@ async function findAssembly() {
   const id = runtimeIds && runtimeIds[0];
 
   if (!Number.isInteger(id)) {
-
     throw new Error(
-      'Assembly GUID not resolved in this model. ' +
-      'Check model selection, IFC version and GUID.'
+      'Assembly GUID not resolved in this model.'
     );
   }
 
@@ -399,25 +313,42 @@ async function findAssembly() {
   lastAssemblySelector = selector;
 
   // ==========================================================
-  // STAGE 2D.3B.4 - CHECK GHOST MODE BEFORE ISOLATION
+  // STEP 1 - CHECK GHOST MODE BEFORE ISOLATION
   // ==========================================================
 
-  await tryInspectNativeGhostMode(
-    'Before isolation'
-  );
+  const ghostBeforeIsolation =
+    await tryInspectNativeGhostMode(
+      'Before isolation'
+    );
+
+  if (ghostBeforeIsolation === true) {
+
+    status(
+      'Turn OFF native Ghost Mode in the ' +
+      'Trimble Connect toolbar, then run ' +
+      'Isolate, Select & Zoom again.'
+    );
+
+    log(
+      'Navigation paused: Native Ghost Mode must be OFF'
+    );
+
+    return false;
+  }
 
   // ==========================================================
-  // SHOW ONLY SELECTED OBJECTS
+  // STEP 2 - SHOW ONLY SELECTED OBJECTS
   // ==========================================================
 
   status('Showing only the selected assembly...');
 
-  const isolated = await api.viewer.isolateEntities([
-    {
-      modelId: modelId,
-      entityIds: [id]
-    }
-  ]);
+  const isolated =
+    await api.viewer.isolateEntities([
+      {
+        modelId,
+        entityIds: [id]
+      }
+    ]);
 
   log('Show Only Selected Objects', {
     modelId,
@@ -426,22 +357,35 @@ async function findAssembly() {
   });
 
   if (isolated !== true) {
-
     throw new Error(
       'Trimble Connect could not isolate the assembly.'
     );
   }
 
   // ==========================================================
-  // CHECK GHOST MODE AFTER ISOLATION
+  // STEP 3 - REQUEST NATIVE GHOST MODE
   // ==========================================================
 
-  await tryInspectNativeGhostMode(
-    'After isolation'
-  );
+  const ghostAfterIsolation =
+    await tryInspectNativeGhostMode(
+      'Immediately after isolation'
+    );
+
+  if (ghostAfterIsolation !== true) {
+
+    status(
+      'Assembly isolated successfully. ' +
+      'Enable native Ghost Mode in the ' +
+      'Trimble Connect toolbar.'
+    );
+
+    log(
+      'Assembly isolated. Native Ghost Mode is OFF.'
+    );
+  }
 
   // ==========================================================
-  // SELECT AND HIGHLIGHT ASSEMBLY
+  // STEP 4 - HIGHLIGHT ASSEMBLY
   // ==========================================================
 
   status('Highlighting the assembly...');
@@ -452,7 +396,7 @@ async function findAssembly() {
   );
 
   // ==========================================================
-  // ZOOM CAMERA
+  // STEP 5 - ZOOM TO ASSEMBLY
   // ==========================================================
 
   status('Zooming to the selected assembly...');
@@ -460,48 +404,42 @@ async function findAssembly() {
   await api.viewer.setCamera(selector);
 
   // ==========================================================
-  // CHECK GHOST MODE AFTER SELECTION AND ZOOM
+  // STEP 6 - FINAL GHOST MODE STATUS
   // ==========================================================
 
-  await tryInspectNativeGhostMode(
-    'After selection and zoom'
-  );
+  const nativeGhostState =
+    await tryInspectNativeGhostMode(
+      'Navigation completed'
+    );
 
-// ==========================================================
-// STAGE 2D.3B.5 - NAVIGATION COMPLETE
-// ==========================================================
+  if (nativeGhostState === true) {
 
-const nativeGhostState =
-  await tryInspectNativeGhostMode(
-    'Navigation completed'
-  );
+    status(
+      'Assembly isolated, highlighted and zoomed. ' +
+      'Native Ghost Mode is ON.'
+    );
 
-if (nativeGhostState === true) {
+  } else {
 
-  status(
-    'Assembly isolated, highlighted and zoomed. ' +
-    'Native Ghost Mode is ON.'
-  );
+    status(
+      'Assembly isolated, highlighted and zoomed. ' +
+      'Enable native Ghost Mode in the ' +
+      'Trimble Connect toolbar.'
+    );
+  }
 
-} else {
+  log('Assembly navigation completed', {
+    modelId,
+    guid,
+    runtimeId: id,
+    nativeGhostState
+  });
 
-  status(
-    'Assembly isolated, highlighted and zoomed. ' +
-    'Enable Ghost Mode in the Trimble Connect toolbar ' +
-    'to display transparent surrounding steelwork.'
-  );
+  return true;
 }
 
-log('Assembly navigation completed', {
-  modelId,
-  guid,
-  runtimeId: id,
-  nativeGhostState
-});
-
-
 // ============================================================
-// STAGE 2D.3B - AUTOMATIC ASSEMBLY NAVIGATION
+// AUTOMATIC ASSEMBLY NAVIGATION
 // ============================================================
 
 async function attemptAutoNavigation() {
@@ -528,19 +466,16 @@ async function attemptAutoNavigation() {
 
       status(
         'Automatically locating assembly. Attempt ' +
-        attempt + ' of ' + AUTO_NAVIGATION_MAX_ATTEMPTS
+        attempt + ' of ' +
+        AUTO_NAVIGATION_MAX_ATTEMPTS
       );
 
       try {
 
-        // ====================================================
-        // REFRESH AVAILABLE MODELS
-        // ====================================================
-
-        const models = await api.viewer.getModels();
+        const models =
+          await api.viewer.getModels();
 
         const modelSelect = el('model');
-
         const previousModelId = modelSelect.value;
 
         modelSelect.replaceChildren();
@@ -552,11 +487,10 @@ async function attemptAutoNavigation() {
             model.modelId ||
             model.versionId;
 
-          if (!modelId) {
-            continue;
-          }
+          if (!modelId) continue;
 
-          const option = document.createElement('option');
+          const option =
+            document.createElement('option');
 
           option.value = modelId;
 
@@ -577,23 +511,33 @@ async function attemptAutoNavigation() {
         }
 
         if (!modelSelect.value) {
-
           throw new Error(
             'No IFC model available yet.'
           );
         }
 
-        // ====================================================
-        // RUN EXISTING ASSEMBLY NAVIGATION
-        // ====================================================
+        const completed =
+          await findAssembly();
 
-        await findAssembly();
+        // Ghost Mode was ON before isolation.
+        // Stop retries until the user turns it OFF.
+
+        if (completed === false) {
+
+          autoNavigationPending = false;
+
+          log(
+            'Automatic navigation paused for Ghost Mode'
+          );
+
+          return;
+        }
 
         autoNavigationPending = false;
 
         status(
           'Automatic assembly navigation completed. ' +
-          'Native Ghost Mode can be toggled in the viewer toolbar.'
+          'Enable native Ghost Mode if required.'
         );
 
         log('Automatic navigation successful', {
@@ -646,7 +590,6 @@ async function attemptAutoNavigation() {
   }
 }
 
-
 // ============================================================
 // BUTTON EVENT LISTENERS
 // ============================================================
@@ -666,13 +609,9 @@ el('find').addEventListener(
   run(findAssembly)
 );
 
-
 // ============================================================
-// STAGE 2D.3B.4 - NATIVE GHOST MODE INSPECTION
+// NATIVE GHOST MODE STATUS INDICATOR
 // ============================================================
-
-// The checkbox displays the native Ghost Mode state.
-// It cannot be clicked during this diagnostic stage.
 
 el('ghostMode').checked = false;
 el('ghostMode').disabled = true;
@@ -681,16 +620,24 @@ el('inspectGhost').addEventListener(
   'click',
   run(async () => {
 
-    await inspectNativeGhostMode(
-      'Manual toolbar check'
-    );
+    const ghostState =
+      await inspectNativeGhostMode(
+        'Manual toolbar check'
+      );
 
+    status(
+      'Native Ghost Mode: ' +
+      (ghostState === true
+        ? 'ON'
+        : ghostState === false
+          ? 'OFF'
+          : 'Not reported')
+    );
   })
 );
 
-
 // ============================================================
-// STAGE 2D.3B - INITIALISE AUTOMATIC NAVIGATION
+// INITIALISE AUTOMATIC NAVIGATION
 // ============================================================
 
 if (incomingGuid) {
@@ -706,9 +653,6 @@ if (incomingGuid) {
     log('Navigation URL GUID detected', {
       teklaGuid: incomingGuid
     });
-
-    // Connect automatically.
-    // connect() will then call attemptAutoNavigation().
 
     run(connect)();
 
