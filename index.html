@@ -6,7 +6,7 @@
   <title>BPA Assembly Navigator</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js" defer></script>
-<script src="app.js?v=2D3B-7" defer></script>
+<script src="app.js?v=2D3B-8" defer></script>
 </head>
 <body>
 <header>
@@ -25,11 +25,15 @@
 >
     <label for="model">Loaded model</label>
     <select id="model"><option value="">Connect to viewer first</option></select>
-    <div class="ghost-controls">
+<div class="ghost-controls">
   <label>
-    <input type="checkbox" id="ghostMode" checked>
-    Ghost Mode
+    <input type="checkbox" id="ghostMode" disabled>
+    Native Ghost Mode (status only)
   </label>
+
+  <button id="inspectGhost" type="button">
+    Read Ghost Mode State
+  </button>
 </div>
 
 <div class="actions"><button id="connect">Connect / Refresh Models</button><button id="read">Read Selected Object</button><button id="find" class="primary">
