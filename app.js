@@ -26,11 +26,14 @@
 
 let api = null;
 
+// Stage 2D.3B.3 - BPA Ghost Mode
+let ghostModeEnabled = true;
+let lastAssemblySelector = null;
+
 const el = id => document.getElementById(id);
 
 const validGuid = value =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-
 
 
  // ============================================================
@@ -217,6 +220,61 @@ async function readSelected() {
 }
 
 
+ // ============================================================
+ // STAGE 2D.3B.3 - BPA GHOST MODE
+ // ============================================================
+
+ async function applyGhostMode(selector) {
+
+   if (!api) {
+     throw new Error('Connect to viewer first.');
+   }
+
+   if (!selector) {
+     throw new Error('No assembly has been selected.');
+   }
+
+   if (ghostModeEnabled) {
+
+     status('Applying BPA Ghost Mode...');
+
+     // Show surrounding objects as transparent context.
+     await api.viewer.setObjectState(
+       undefined,
+       {
+         visible: true,
+         opacity: 0.15
+       }
+     );
+
+     // Keep the target assembly fully visible.
+     await api.viewer.setObjectState(
+       selector,
+       {
+         visible: true,
+         opacity: 1
+       }
+     );
+
+     log('BPA Ghost Mode enabled');
+
+   } else {
+
+     status('Restoring normal model appearance...');
+
+     await api.viewer.setObjectState(
+       undefined,
+       {
+         visible: 'reset',
+         opacity: 1
+       }
+     );
+
+     log('BPA Ghost Mode disabled');
+   }
+ }
+
+
 // ============================================================
 // FIND, SELECT AND ZOOM TO ASSEMBLY
 // EXISTING WORKING FUNCTION - PRESERVED
@@ -282,41 +340,57 @@ async function findAssembly() {
   };
 
  
+
   // ==========================================================
-  // STAGE 2D.3B.2 - SHOW ONLY THE TARGET ASSEMBLY
+  // STAGE 2D.3B.3 - ISOLATION AND GHOST MODE
   // ==========================================================
 
-  status('Isolating the selected assembly...');
+  // Store the assembly so the checkbox can update it later.
+  lastAssemblySelector = selector;
 
-  const isolated = await api.viewer.isolateEntities([
-    {
-      modelId: modelId,
-      entityIds: [id]
+  if (ghostModeEnabled) {
+
+    // BPA ghost effect:
+    // Surrounding objects are transparent.
+    // The target assembly remains fully visible.
+    await applyGhostMode(selector);
+
+  } else {
+
+    // Normal Show Only Selected Objects behaviour.
+    status('Isolating the selected assembly...');
+
+    const isolated = await api.viewer.isolateEntities([
+      {
+        modelId: modelId,
+        entityIds: [id]
+      }
+    ]);
+
+    log('Show Only Selected Objects', {
+      modelId,
+      runtimeId: id,
+      result: isolated
+    });
+
+    if (isolated !== true) {
+      throw new Error(
+        'Trimble Connect could not isolate the assembly.'
+      );
     }
-  ]);
-
-  log('Show Only Selected Objects', {
-    modelId: modelId,
-    runtimeId: id,
-    result: isolated
-  });
-
-  if (isolated !== true) {
-    throw new Error(
-      'Trimble Connect could not isolate the assembly.'
-    );
   }
 
   // ==========================================================
   // SELECT AND HIGHLIGHT ASSEMBLY
   // ==========================================================
 
-  status('Highlighting the isolated assembly...');
+  status('Highlighting the assembly...');
 
   await api.viewer.setSelection(
     selector,
     'set'
   );
+
 
   // ==========================================================
   // ZOOM CAMERA
@@ -476,6 +550,7 @@ el('read').addEventListener(
   run(readSelected)
 );
 
+
 el('find').addEventListener(
   'click',
   run(findAssembly)
@@ -483,8 +558,37 @@ el('find').addEventListener(
 
 
 // ============================================================
+// STAGE 2D.3B.3 - GHOST MODE CHECKBOX
+// ============================================================
+
+el('ghostMode').checked = ghostModeEnabled;
+
+el('ghostMode').addEventListener(
+  'change',
+  run(async () => {
+
+    ghostModeEnabled = el('ghostMode').checked;
+
+    if (!api || !lastAssemblySelector) {
+      return;
+    }
+
+    await applyGhostMode(lastAssemblySelector);
+
+    // Keep the assembly highlighted.
+    await api.viewer.setSelection(
+      lastAssemblySelector,
+      'set'
+    );
+
+  })
+);
+
+
+// ============================================================
 // STAGE 2D.3B - INITIALISE AUTOMATIC NAVIGATION
 // ============================================================
+
 
 if (incomingGuid) {
 
