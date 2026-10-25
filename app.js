@@ -229,6 +229,154 @@ async function connect() {
   }
 }
 
+
+ // ============================================================
+ // STAGE 2D.3B.7A - GHOST MODE API CAPABILITY INVESTIGATION
+ // ============================================================
+
+ async function inspectGhostApiCapabilities() {
+
+   if (!api) {
+     throw new Error(
+       'Connect to Trimble Connect before running diagnostics.'
+     );
+   }
+
+   status('Inspecting available Ghost Mode API capabilities...');
+
+   // Only inspect method names and read the presentation.
+   // No viewer settings will be changed.
+
+   const getMethodNames = object => {
+
+     if (!object) return [];
+
+     const names = new Set();
+     let current = object;
+     let depth = 0;
+
+     while (current && depth < 5) {
+
+       try {
+
+         for (const name of Object.getOwnPropertyNames(current)) {
+
+           if (name === 'constructor') continue;
+
+           try {
+
+             if (typeof object[name] === 'function') {
+               names.add(name);
+             }
+
+           } catch (_) {
+             // Ignore inaccessible properties.
+           }
+         }
+
+       } catch (_) {
+         // Ignore inaccessible objects.
+       }
+
+       current = Object.getPrototypeOf(current);
+       depth++;
+     }
+
+     return Array.from(names).sort();
+   };
+
+   const viewerMethods = getMethodNames(api.viewer);
+   const viewMethods = getMethodNames(api.view);
+
+   const relevantPattern =
+     /ghost|present|transparen|visual|display|render|state|command|mode|style/i;
+
+   const relevantViewerMethods =
+     viewerMethods.filter(name =>
+       relevantPattern.test(name)
+     );
+
+   const relevantViewMethods =
+     viewMethods.filter(name =>
+       relevantPattern.test(name)
+     );
+
+   const candidateNames = [
+     'setPresentation',
+     'updatePresentation',
+     'setGhostMode',
+     'setGhost',
+     'setViewerMode',
+     'executeCommand',
+     'runCommand',
+     'setObjectState',
+     'getPresentation'
+   ];
+
+   const candidates = candidateNames.map(name => ({
+     method: name,
+     available:
+       typeof api.viewer?.[name] === 'function'
+   }));
+
+   let presentation = null;
+   let presentationError = null;
+
+   try {
+
+     if (typeof api.viewer.getPresentation === 'function') {
+
+       presentation =
+         await api.viewer.getPresentation();
+
+     }
+
+   } catch (error) {
+
+     presentationError = error.message;
+   }
+
+   const result = {
+     stage: '2D.3B.7A',
+     nativeGhostMode: presentation?.ghost ?? 'Not reported',
+     candidateMethods: candidates,
+     relevantViewerMethods,
+     relevantViewMethods,
+     allViewerMethods: viewerMethods,
+     allViewMethods: viewMethods,
+     presentationError
+   };
+
+   log('GHOST MODE API CAPABILITY REPORT', result);
+
+   const availableCandidates =
+     candidates.filter(item => item.available);
+
+   const possibleSetters =
+     availableCandidates.filter(item =>
+       item.method !== 'getPresentation' &&
+       item.method !== 'setObjectState'
+     );
+
+   if (possibleSetters.length > 0) {
+
+     status(
+       'Potential API methods detected. ' +
+       'Review the diagnostic report before testing.'
+     );
+
+   } else {
+
+     status(
+       'API inspection complete. No named native Ghost Mode ' +
+       'setter detected. Review the diagnostic report.'
+     );
+   }
+
+   return result;
+ }
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -634,6 +782,15 @@ el('inspectGhost').addEventListener(
           : 'Not reported')
     );
   })
+);
+
+// ============================================================
+// STAGE 2D.3B.7A - DIAGNOSTIC BUTTON
+// ============================================================
+
+el('inspectGhostApi').addEventListener(
+  'click',
+  run(inspectGhostApiCapabilities)
 );
 
 // ============================================================
