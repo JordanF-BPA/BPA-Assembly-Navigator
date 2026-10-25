@@ -6,14 +6,14 @@
   <title>BPA Assembly Navigator</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js" defer></script>
-<script src="app.js?v=2D3B-10" defer></script>
+<script src="app.js?v=2D3B-12" defer></script>
 </head>
 <body>
 <header>
   <div class="brand">BPA</div>
   <div>
     <h1>Assembly Navigator</h1>
-<p>Trimble Connect • Stage 2D.3B.6</p>
+<p>Trimble Connect • Stage 2D.3B.7A</p>
   </div>
 </header>
   <main>
@@ -31,9 +31,13 @@
     Native Ghost Mode (status only)
   </label>
 
-  <button id="inspectGhost" type="button">
-    Read Ghost Mode State
-  </button>
+<button id="inspectGhost" type="button">
+  Read Ghost Mode State
+</button>
+
+<button id="inspectGhostApi" type="button">
+  Check Ghost Mode API Support
+</button>
 </div>
 
 <div class="actions"><button id="connect">Connect / Refresh Models</button><button id="read">Read Selected Object</button><button id="find" class="primary">
