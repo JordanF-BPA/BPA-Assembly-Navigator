@@ -346,39 +346,37 @@ async function findAssembly() {
   // ==========================================================
 
   // Store the assembly so the checkbox can update it later.
-  lastAssemblySelector = selector;
 
-  if (ghostModeEnabled) {
+lastAssemblySelector = selector;
 
-    // BPA ghost effect:
-    // Surrounding objects are transparent.
-    // The target assembly remains fully visible.
-    await applyGhostMode(selector);
+// ==========================================================
+// ALWAYS ISOLATE THE SELECTED ASSEMBLY
+// ==========================================================
 
-  } else {
+status('Showing only the selected assembly...');
 
-    // Normal Show Only Selected Objects behaviour.
-    status('Isolating the selected assembly...');
-
-    const isolated = await api.viewer.isolateEntities([
-      {
-        modelId: modelId,
-        entityIds: [id]
-      }
-    ]);
-
-    log('Show Only Selected Objects', {
-      modelId,
-      runtimeId: id,
-      result: isolated
-    });
-
-    if (isolated !== true) {
-      throw new Error(
-        'Trimble Connect could not isolate the assembly.'
-      );
-    }
+const isolated = await api.viewer.isolateEntities([
+  {
+    modelId: modelId,
+    entityIds: [id]
   }
+]);
+
+log('Show Only Selected Objects', {
+  modelId,
+  runtimeId: id,
+  result: isolated
+});
+
+if (isolated !== true) {
+  throw new Error(
+    'Trimble Connect could not isolate the assembly.'
+  );
+}
+
+// Do not call applyGhostMode() here yet.
+// First confirm isolation works independently.
+
 
   // ==========================================================
   // SELECT AND HIGHLIGHT ASSEMBLY
