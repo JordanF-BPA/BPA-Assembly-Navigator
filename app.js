@@ -281,20 +281,48 @@ async function findAssembly() {
     ]
   };
 
+ 
   // ==========================================================
-  // SELECT ASSEMBLY
+  // STAGE 2D.3B.2 - SHOW ONLY THE TARGET ASSEMBLY
   // ==========================================================
+
+  status('Isolating the selected assembly...');
+
+  const isolated = await api.viewer.isolateEntities([
+    {
+      modelId: modelId,
+      entityIds: [id]
+    }
+  ]);
+
+  log('Show Only Selected Objects', {
+    modelId: modelId,
+    runtimeId: id,
+    result: isolated
+  });
+
+  if (isolated !== true) {
+    throw new Error(
+      'Trimble Connect could not isolate the assembly.'
+    );
+  }
+
+  // ==========================================================
+  // SELECT AND HIGHLIGHT ASSEMBLY
+  // ==========================================================
+
+  status('Highlighting the isolated assembly...');
 
   await api.viewer.setSelection(
     selector,
     'set'
   );
 
-  status('Object selected. Fitting camera...');
-
   // ==========================================================
   // ZOOM CAMERA
   // ==========================================================
+
+  status('Zooming to the selected assembly...');
 
   await api.viewer.setCamera(selector);
 
