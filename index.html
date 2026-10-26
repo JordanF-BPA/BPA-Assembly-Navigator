@@ -1,218 +1,83 @@
+
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
   <title>BPA Assembly Navigator</title>
+
   <link rel="stylesheet" href="styles.css">
-  <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js" defer></script>
-<script src="app.js?v=2D3B-25" defer></script>
+
+  <script
+    src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"
+    defer>
+  </script>
+
+  <script src="app.js?v=2D3B-26" defer></script>
 </head>
+
 <body>
-<header>
-  <div class="brand">BPA</div>
-  <div>
-    <h1>Assembly Navigator</h1>
-<p>Trimble Connect • Stage 2D.3B.7C.7</p>
-  </div>
-</header>
+
+  <header>
+    <div class="brand">BPA</div>
+
+    <div>
+      <h1>Assembly Navigator</h1>
+      <p>Trimble Connect</p>
+    </div>
+  </header>
+
   <main>
+
     <label for="guid">Tekla assembly GUID</label>
-	  <input
-	  id="guid"
-	  spellcheck="false"
-	  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
->
-    <label for="model">Loaded model</label>
-    <select id="model"><option value="">Connect to viewer first</option></select>
-<div class="ghost-controls">
-  <label>
-    <input type="checkbox" id="ghostMode" disabled>
-    Native Ghost Mode (status only)
-  </label>
 
-<button id="inspectGhost" type="button">
-  Read Ghost Mode State
-</button>
+    <input
+      id="guid"
+      type="text"
+      spellcheck="false"
+      autocomplete="off"
+      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+    >
 
-<button id="inspectGhostApi" type="button">
-  Check Ghost Mode API Support
-</button>
+    <label for="model">Loaded IFC model</label>
 
-<button id="inspectViewerSettings" type="button">
-  Inspect Viewer Settings
-</button>
+    <select id="model">
+      <option value="">Connect to viewer first</option>
+    </select>
 
-<button id="inspectOpacitySupport" type="button">
-  Inspect Opacity Support
-</button>
-</div>
+    <div class="actions">
 
-<div class="ghost-controls">
-  <label>Stage 2D.3B.7C — Transparency Test</label>
+      <button id="connect" type="button">
+        Connect / Refresh Models
+      </button>
 
-  <button id="testTransparency" type="button">
-    Test Assembly Transparency
-  </button>
+      <button id="find" class="primary" type="button">
+        Find Assembly
+      </button>
 
-  <button id="restoreTransparency" type="button">
-    Restore Appearance
-  </button>
-</div>
+      <button id="restoreNavigation" type="button" disabled>
+        Restore Model Appearance
+      </button>
 
-	  <div class="ghost-controls">
-  <label>Stage 2D.3B.7C.2 — Object Appearance Test</label>
+    </div>
 
-  <button id="testAssemblyColour" type="button">
-    Test Assembly Colour (Red)
-  </button>
+    <p id="status" role="status" aria-live="polite">
+      Waiting to connect.
+    </p>
 
-  <button id="testSingleOpacity" type="button">
-    Test Assembly Opacity
-  </button>
+    <p class="help">
+      Open the required IFC model in Trimble Connect's
+      3D viewer before searching. Enter the original
+      36-character Tekla assembly GUID.
+    </p>
 
-<button id="resetSingleAppearance" type="button">
-  Test Original Colour Reset
-</button>
-</div>
+    <details class="activity-details">
+      <summary>Activity Log</summary>
+      <pre id="log"></pre>
+    </details>
 
-<div class="ghost-controls">
-  <label>
-    Stage 2D.3B.7C.4 — Ghost-Style Transparency
-  </label>
-
-  <button id="testGhostStyle" type="button">
-    Test Ghost-Style Transparency
-  </button>
-
-  <button id="restoreGhostStyle" type="button">
-    Restore Ghost-Style Appearance
-  </button>
-</div>	  
-
-<div class="ghost-controls">
-  <label for="excludedTestGuid">
-    Stage 2D.3B.7C.5 — Does Not Equal Test
-  </label>
-
-  <p class="help">
-    Main Tekla GUID = assembly to keep solid.
-    Second GUID = different assembly to make transparent.
-  </p>
-
-  <label for="excludedTestGuid">
-    Surrounding assembly GUID
-  </label>
-
-  <input
-    id="excludedTestGuid"
-    type="text"
-    spellcheck="false"
-    placeholder="Enter a different assembly GUID"
-  >
-
-  <button id="testDoesNotEqual" type="button">
-    Test Does Not Equal Transparency
-  </button>
-
-  <button id="restoreDoesNotEqual" type="button">
-    Restore Surrounding Assembly
-  </button>
-</div>
-
-<div class="ghost-controls">
-  <label>
-    Stage 2D.3B.7C.6A — IFC Object Discovery
-  </label>
-
-  <p class="help">
-    Read-only investigation of the IFC model hierarchy
-    and available object retrieval methods.
-  </p>
-
-  <button id="inspectObjectDiscovery" type="button">
-    Inspect IFC Object Discovery
-  </button>
-</div>	   
-
-<div class="ghost-controls">
-  <label>
-    Stage 2D.3B.7C.6B — IFC Hierarchy Test
-  </label>
-
-  <p class="help">
-    Read-only inspection of assembly children,
-    parent relationships and all IFC objects.
-  </p>
-
-  <button id="inspectIfcHierarchy" type="button">
-    Inspect IFC Hierarchy
-  </button>
-</div>
-
-<div class="ghost-controls">
-  <label>
-    Stage 2D.3B.7C.6C — Automatic Transparency
-  </label>
-
-  <p class="help">
-    Automatically identifies surrounding IFC objects
-    using one Tekla assembly GUID.
-
-    Initial test is limited to 10 object IDs.
-  </p>
-
-  <button id="testAutomaticTransparency" type="button">
-    Test Automatic Transparency
-  </button>
-
-  <button id="restoreAutomaticTransparency" type="button">
-    Restore Automatic Transparency
-  </button>
-</div>	
-
-<div class="ghost-controls">
-  <label>
-    Stage 2D.3B.7C.6D — Full-Model Transparency
-  </label>
-
-  <p class="help">
-    Make all surrounding IFC objects transparent while
-    keeping the selected assembly solid.
-
-    Uses batches of 50 object IDs and provides restoration.
-  </p>
-
-  <button id="testFullModelTransparency" type="button">
-    Test Full-Model Transparency
-  </button>
-
-  <button id="restoreFullModelTransparency" type="button">
-    Restore Full-Model Transparency
-  </button>
-</div>	  
-
-<div class="actions">
-  <button id="connect" type="button">
-    Connect / Refresh Models
-  </button>
-
-  <button id="read" type="button">
-    Read Selected Object
-  </button>
-
-  <button id="find" class="primary" type="button">
-    Find Assembly &amp; Apply Transparency
-  </button>
-
-  <button id="restoreNavigation" type="button">
-    Restore Model Appearance
-  </button>
-</div>
-    <p id="status" role="status">Waiting to connect.</p>
-    <label for="log">Diagnostic results</label>
-    <pre id="log" aria-live="polite"></pre>
-    <p class="help">Open the required IFC model in Trimble Connect's 3D viewer before searching. This extension uses the original 36-character Tekla GUID.</p>
   </main>
+
 </body>
 </html>
