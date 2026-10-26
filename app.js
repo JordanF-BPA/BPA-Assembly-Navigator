@@ -508,6 +508,190 @@ async function connect() {
  }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7C - CONTROLLED TRANSPARENCY TEST
+ // ============================================================
+
+ let transparencyTestActive = false;
+ let transparencyTestSelector = null;
+ let transparencyTestBusy = false;
+
+ async function testAssemblyTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (transparencyTestBusy) {
+     throw new Error('A transparency operation is already running.');
+   }
+
+   if (transparencyTestActive) {
+     throw new Error(
+       'Restore the previous transparency test before starting another.'
+     );
+   }
+
+   const guid = el('guid').value.trim().toLowerCase();
+   const modelId = el('model').value;
+
+   if (!validGuid(guid)) {
+     throw new Error('Enter a valid Tekla assembly GUID.');
+   }
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   transparencyTestBusy = true;
+
+   try {
+
+     status('Resolving assembly for transparency test...');
+
+     const runtimeIds =
+       await api.viewer.convertToObjectRuntimeIds(
+         modelId,
+         [guid]
+       );
+
+     const runtimeId = runtimeIds && runtimeIds[0];
+
+     if (!Number.isInteger(runtimeId)) {
+       throw new Error('Assembly GUID could not be resolved.');
+     }
+
+     const selector = {
+       modelObjectIds: [
+         {
+           modelId,
+           objectRuntimeIds: [runtimeId],
+           recursive: true
+         }
+       ]
+     };
+
+     const presentationBefore =
+       await api.viewer.getPresentation();
+
+     log('TRANSPARENCY TEST - BEFORE', {
+       modelId,
+       guid,
+       runtimeId,
+       nativeGhostMode: presentationBefore?.ghost
+     });
+
+     // Do not call isolateEntities().
+     // We need the surrounding objects to remain visible.
+
+     status('Applying transparency to loaded objects...');
+
+     // Record the test as active before the first appearance
+     // change, so Restore remains available if a later call fails.
+     transparencyTestActive = true;
+     transparencyTestSelector = selector;
+
+     await api.viewer.setObjectState(
+       undefined,
+       {
+         visible: true,
+         opacity: 0.2
+       }
+     );
+
+     status('Restoring selected assembly to full opacity...');
+
+     await api.viewer.setObjectState(
+       selector,
+       {
+         visible: true,
+         opacity: 1
+       }
+     );
+
+     await api.viewer.setSelection(selector, 'set');
+
+     await api.viewer.setCamera(selector);
+
+     const presentationAfter =
+       await api.viewer.getPresentation();
+
+     log('TRANSPARENCY TEST - AFTER', {
+       modelId,
+       guid,
+       runtimeId,
+       surroundingOpacity: 0.2,
+       assemblyOpacity: 1,
+       nativeGhostMode: presentationAfter?.ghost,
+       testActive: transparencyTestActive
+     });
+
+     status(
+       'Transparency test applied. Check the model appearance. ' +
+       'Use Restore Appearance when finished.'
+     );
+
+   } finally {
+
+     transparencyTestBusy = false;
+   }
+ }
+
+ async function restoreAssemblyAppearance() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (transparencyTestBusy) {
+     throw new Error('A transparency operation is already running.');
+   }
+
+   if (!transparencyTestActive) {
+     status('No active transparency test to restore.');
+     return;
+   }
+
+   transparencyTestBusy = true;
+
+   try {
+
+     status('Restoring model appearance...');
+
+     // Reset test-wide opacity and visibility.
+     // Existing custom appearance overrides may not be
+     // recoverable using this generic reset.
+
+     await api.viewer.setObjectState(
+       undefined,
+       {
+         visible: 'reset',
+         opacity: 1
+       }
+     );
+
+     transparencyTestActive = false;
+     transparencyTestSelector = null;
+
+     log('TRANSPARENCY TEST - RESTORED', {
+       opacityResetTo: 1,
+       visibilityReset: true
+     });
+
+     status(
+       'Test appearance reset. If the original model had ' +
+       'custom appearance overrides, reload the viewer to ' +
+       'recover those settings.'
+     );
+
+   } finally {
+
+     transparencyTestBusy = false;
+   }
+ }
+
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -936,6 +1120,20 @@ el('inspectViewerSettings').addEventListener(
 el('inspectOpacitySupport').addEventListener(
   'click',
   run(inspectOpacitySupport)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C - TRANSPARENCY TEST BUTTONS
+// ============================================================
+
+el('testTransparency').addEventListener(
+  'click',
+  run(testAssemblyTransparency)
+);
+
+el('restoreTransparency').addEventListener(
+  'click',
+  run(restoreAssemblyAppearance)
 );
 
 // ============================================================
