@@ -595,7 +595,7 @@ async function connect() {
        undefined,
        {
          visible: true,
-         opacity: 0.2
+         opacity: 50
        }
      );
 
