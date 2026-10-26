@@ -2128,12 +2128,36 @@ async function resetSingleObjectAppearance() {
 
      }
 
-     log('FULL-MODEL TRANSPARENCY - COMPLETE', {
-       ...fullTransparencyDetails,
-       processed,
-       selectedAppearanceModified: false,
-       restoreAvailable: true
-     });
+// ============================================================
+// STAGE 2D.3B.7C.6E
+// KEEP SELECTED ASSEMBLY FULLY OPAQUE
+// ============================================================
+
+// The full-model transparency operation may also affect
+// the selected assembly through IFC hierarchy relationships.
+//
+// Reapply full opacity to the selected assembly and all
+// its descendants after processing surrounding objects.
+
+status('Restoring selected assembly to full opacity...');
+
+await api.viewer.setObjectState(
+  selectedSelector,
+  {
+    opacity: 1
+  }
+);
+
+// Do not modify the assembly's colour.
+// Its original IFC material colours must remain unchanged.
+
+log('FULL-MODEL TRANSPARENCY - COMPLETE', {
+  ...fullTransparencyDetails,
+  processed,
+  selectedOpacityRequested: 1,
+  selectedColourModified: false,
+  restoreAvailable: true
+});
 
      status(
        'Full-model transparency applied to ' +
