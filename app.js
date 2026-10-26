@@ -1425,6 +1425,174 @@ async function resetSingleObjectAppearance() {
  }
 
 
+
+ // ============================================================
+ // STAGE 2D.3B.7C.6B - IFC HIERARCHY RETRIEVAL
+ // READ-ONLY DIAGNOSTICS
+ // ============================================================
+
+ let hierarchyTestBusy = false;
+
+ async function inspectIfcHierarchy() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (hierarchyTestBusy) {
+     throw new Error('Hierarchy inspection is already running.');
+   }
+
+   const modelId = el('model').value;
+   const guid = el('guid').value.trim().toLowerCase();
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   if (!validGuid(guid)) {
+     throw new Error('Enter a valid Tekla assembly GUID.');
+   }
+
+   hierarchyTestBusy = true;
+
+   try {
+
+     status('Resolving selected IFC assembly...');
+
+     const runtimeIds =
+       await api.viewer.convertToObjectRuntimeIds(
+         modelId,
+         [guid]
+       );
+
+     const runtimeId = runtimeIds && runtimeIds[0];
+
+     if (!Number.isInteger(runtimeId)) {
+       throw new Error('Assembly GUID could not be resolved.');
+     }
+
+     // Capture each independent API result, including errors,
+     // without stopping the other read-only tests.
+
+     async function probe(name, callback) {
+
+       try {
+
+         const result = await callback();
+
+         return {
+           method: name,
+           success: true,
+           count: Array.isArray(result)
+             ? result.length
+             : null,
+           sample: Array.isArray(result)
+             ? result.slice(0, 5)
+             : result
+         };
+
+       } catch (error) {
+
+         return {
+           method: name,
+           success: false,
+           error: error.message
+         };
+       }
+     }
+
+     status('Reading assembly children and parents...');
+
+     const directChildren = await probe(
+       'getHierarchyChildren - direct',
+       () => api.viewer.getHierarchyChildren(
+         modelId,
+         [runtimeId]
+       )
+     );
+
+     const recursiveChildren = await probe(
+       'getHierarchyChildren - recursive',
+       () => api.viewer.getHierarchyChildren(
+         modelId,
+         [runtimeId],
+         undefined,
+         true
+       )
+     );
+
+     const directParents = await probe(
+       'getHierarchyParents - direct',
+       () => api.viewer.getHierarchyParents(
+         modelId,
+         [runtimeId]
+       )
+     );
+
+     status('Reading IFC object information...');
+
+     const selectedSelector = {
+       modelObjectIds: [{
+         modelId,
+         objectRuntimeIds: [runtimeId],
+         recursive: true
+       }]
+     };
+
+     const selectedObjects = await probe(
+       'getObjects - selected assembly',
+       () => api.viewer.getObjects(selectedSelector)
+     );
+
+     // getObjects without a selector is documented as valid.
+     // Its results are sampled rather than fully printed.
+
+     const allObjects = await probe(
+       'getObjects - all viewer objects',
+       () => api.viewer.getObjects()
+     );
+
+     const report = {
+       stage: '2D.3B.7C.6B',
+       mode: 'Read-only',
+       modelId,
+       guid,
+       selectedRuntimeId: runtimeId,
+       tests: {
+         directChildren,
+         recursiveChildren,
+         directParents,
+         selectedObjects,
+         allObjects
+       },
+       viewerAppearanceModified: false,
+       notes: [
+         'Only read-only API methods were called.',
+         'Samples are limited to five entries per result.',
+         'Object counts and identifier formats require review.',
+         'All-viewer results may include other loaded models.'
+       ]
+     };
+
+     log(
+       'STAGE 2D.3B.7C.6B - IFC HIERARCHY REPORT',
+       report
+     );
+
+     status(
+       'Hierarchy inspection completed. ' +
+       'Copy the diagnostic report for review.'
+     );
+
+     return report;
+
+   } finally {
+     hierarchyTestBusy = false;
+   }
+ }
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -1923,6 +2091,15 @@ el('restoreDoesNotEqual').addEventListener(
 el('inspectObjectDiscovery').addEventListener(
   'click',
   run(inspectIfcObjectDiscovery)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C.6B - HIERARCHY TEST BUTTON
+// ============================================================
+
+el('inspectIfcHierarchy').addEventListener(
+  'click',
+  run(inspectIfcHierarchy)
 );
 
 // ============================================================
