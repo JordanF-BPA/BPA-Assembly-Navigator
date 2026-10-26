@@ -1,23 +1,26 @@
 
 /*
  * BPA Assembly Navigator
- * Stage 2D.3B.6 - Ghost Mode Sequence Control
+ * Stage 2D.3B.7C.7
  *
  * Features:
  * - Connect to Trimble Connect
  * - Read selected objects
  * - Resolve Tekla assembly GUID
- * - Show Only Selected Objects
- * - Check native Ghost Mode before isolation
- * - Request native Ghost Mode after isolation
- * - Highlight and zoom to assembly
+ * - Automatically make surrounding IFC objects transparent
+ * - Keep selected assembly fully opaque
+ * - Preserve original IFC colours
+ * - Select and zoom to the assembly
+ * - Restore model appearance
+ * - Automatically restore when changing assemblies
  * - Automatic URL GUID navigation
  * - Model loading retry
  * - Native Ghost Mode diagnostics
- * - Live presentation change detection
  *
- * Native Ghost Mode is controlled through the
- * Trimble Connect toolbar during this stage.
+ * Stage 2D.3B.7C.7 integration:
+ * The main navigation workflow will use the
+ * successfully tested full-model transparency
+ * functionality instead of isolateEntities().
  */
 
 'use strict';
@@ -28,6 +31,10 @@
 
 let api = null;
 let lastAssemblySelector = null;
+
+// Stage 2D.3B.7C.7
+// Prevent simultaneous main navigation operations.
+let assemblyNavigationBusy = false;
 
 const el = id => document.getElementById(id);
 
@@ -229,599 +236,598 @@ async function connect() {
   }
 }
 
-
- // ============================================================
- // STAGE 2D.3B.7A - GHOST MODE API CAPABILITY INVESTIGATION
- // ============================================================
-
- async function inspectGhostApiCapabilities() {
-
-   if (!api) {
-     throw new Error(
-       'Connect to Trimble Connect before running diagnostics.'
-     );
-   }
-
-   status('Inspecting available Ghost Mode API capabilities...');
-
-   // Only inspect method names and read the presentation.
-   // No viewer settings will be changed.
-
-   const getMethodNames = object => {
-
-     if (!object) return [];
-
-     const names = new Set();
-     let current = object;
-     let depth = 0;
-
-     while (current && depth < 5) {
-
-       try {
-
-         for (const name of Object.getOwnPropertyNames(current)) {
-
-           if (name === 'constructor') continue;
-
-           try {
-
-             if (typeof object[name] === 'function') {
-               names.add(name);
-             }
-
-           } catch (_) {
-             // Ignore inaccessible properties.
-           }
-         }
-
-       } catch (_) {
-         // Ignore inaccessible objects.
-       }
-
-       current = Object.getPrototypeOf(current);
-       depth++;
-     }
-
-     return Array.from(names).sort();
-   };
-
-   const viewerMethods = getMethodNames(api.viewer);
-   const viewMethods = getMethodNames(api.view);
-
-   const relevantPattern =
-     /ghost|present|transparen|visual|display|render|state|command|mode|style/i;
-
-   const relevantViewerMethods =
-     viewerMethods.filter(name =>
-       relevantPattern.test(name)
-     );
-
-   const relevantViewMethods =
-     viewMethods.filter(name =>
-       relevantPattern.test(name)
-     );
-
-   const candidateNames = [
-     'setPresentation',
-     'updatePresentation',
-     'setGhostMode',
-     'setGhost',
-     'setViewerMode',
-     'executeCommand',
-     'runCommand',
-     'setObjectState',
-     'getPresentation'
-   ];
-
-   const candidates = candidateNames.map(name => ({
-     method: name,
-     available:
-       typeof api.viewer?.[name] === 'function'
-   }));
-
-   let presentation = null;
-   let presentationError = null;
-
-   try {
-
-     if (typeof api.viewer.getPresentation === 'function') {
-
-       presentation =
-         await api.viewer.getPresentation();
-
-     }
-
-   } catch (error) {
-
-     presentationError = error.message;
-   }
-
-   const result = {
-     stage: '2D.3B.7A',
-     nativeGhostMode: presentation?.ghost ?? 'Not reported',
-     candidateMethods: candidates,
-     relevantViewerMethods,
-     relevantViewMethods,
-     allViewerMethods: viewerMethods,
-     allViewMethods: viewMethods,
-     presentationError
-   };
-
-   log('GHOST MODE API CAPABILITY REPORT', result);
-
-   const availableCandidates =
-     candidates.filter(item => item.available);
-
-   const possibleSetters =
-     availableCandidates.filter(item =>
-       item.method !== 'getPresentation' &&
-       item.method !== 'setObjectState'
-     );
-
-   if (possibleSetters.length > 0) {
-
-     status(
-       'Potential API methods detected. ' +
-       'Review the diagnostic report before testing.'
-     );
-
-   } else {
-
-     status(
-       'API inspection complete. No named native Ghost Mode ' +
-       'setter detected. Review the diagnostic report.'
-     );
-   }
-
-   return result;
- }
-
-
- // ============================================================
- // STAGE 2D.3B.7B - VIEWER SETTINGS & OPACITY INVESTIGATION
- // READ-ONLY DIAGNOSTICS
- // ============================================================
-
- async function inspectViewerSettings() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   status('Reading Trimble Connect viewer settings...');
-
-   const settings =
-     await api.viewer.getSettings();
-
-   const presentation =
-     await api.viewer.getPresentation();
-
-   const settingsKeys =
-     settings && typeof settings === 'object'
-       ? Object.keys(settings)
-       : [];
-
-   const ghostRelatedKeys =
-     settingsKeys.filter(key =>
-       /ghost|opacity|transparen|visual|render|display/i.test(key)
-     );
-
-   const report = {
-     stage: '2D.3B.7B',
-     test: 'Viewer Settings',
-     nativeGhostMode: presentation?.ghost ?? 'Not reported',
-     viewerSettings: settings,
-     settingsKeys,
-     ghostRelatedKeys,
-     documentedSettings: [
-       'assemblySelection',
-       'zoomToFitRatio'
-     ],
-     getSettingsAvailable:
-       typeof api.viewer.getSettings === 'function',
-     setSettingsAvailable:
-       typeof api.viewer.setSettings === 'function',
-     settingsModified: false
-   };
-
-   log('VIEWER SETTINGS DIAGNOSTIC REPORT', report);
-
-   status(
-     'Viewer settings read successfully. ' +
-     'Review the diagnostic report.'
-   );
-
-   return report;
- }
-
- async function inspectOpacitySupport() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   status('Inspecting opacity and object-state capabilities...');
-
-   const presentation =
-     await api.viewer.getPresentation();
-
-   const settings =
-     await api.viewer.getSettings();
-
-   const viewer = api.viewer;
-
-   const report = {
-     stage: '2D.3B.7B',
-     test: 'Opacity and Object State',
-     nativeGhostMode: presentation?.ghost ?? 'Not reported',
-
-     methods: {
-       setOpacity:
-         typeof viewer.setOpacity === 'function',
-       setObjectState:
-         typeof viewer.setObjectState === 'function',
-       getPresentation:
-         typeof viewer.getPresentation === 'function',
-       getSettings:
-         typeof viewer.getSettings === 'function'
-     },
-
-     documentedOpacityRange: {
-       minimum: 0,
-       maximum: 100,
-       parameterName: 'transparency',
-       scope: '3D viewer'
-     },
-
-     objectSpecificControl: {
-       method: 'setObjectState',
-       acceptsObjectSelector: true,
-       requiresObjectState: true
-     },
-
-     presentationProperties:
-       presentation && typeof presentation === 'object'
-         ? Object.keys(presentation)
-         : [],
-
-     settingsProperties:
-       settings && typeof settings === 'object'
-         ? Object.keys(settings)
-         : [],
-
-     methodsInvoked: [
-       'getPresentation',
-       'getSettings'
-     ],
-
-     viewerModified: false
-   };
-
-   log('OPACITY SUPPORT DIAGNOSTIC REPORT', report);
-
-   status(
-     'Opacity investigation complete. ' +
-     'No viewer appearance changes were made.'
-   );
-
-   return report;
- }
-
-
- // ============================================================
- // STAGE 2D.3B.7C - CONTROLLED TRANSPARENCY TEST
- // ============================================================
-
- let transparencyTestActive = false;
- let transparencyTestSelector = null;
- let transparencyTestBusy = false;
-
- async function testAssemblyTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (transparencyTestBusy) {
-     throw new Error('A transparency operation is already running.');
-   }
-
-   if (transparencyTestActive) {
-     throw new Error(
-       'Restore the previous transparency test before starting another.'
-     );
-   }
-
-   const guid = el('guid').value.trim().toLowerCase();
-   const modelId = el('model').value;
-
-   if (!validGuid(guid)) {
-     throw new Error('Enter a valid Tekla assembly GUID.');
-   }
-
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
-
-   transparencyTestBusy = true;
-
-   try {
-
-     status('Resolving assembly for transparency test...');
-
-     const runtimeIds =
-       await api.viewer.convertToObjectRuntimeIds(
-         modelId,
-         [guid]
-       );
-
-     const runtimeId = runtimeIds && runtimeIds[0];
-
-     if (!Number.isInteger(runtimeId)) {
-       throw new Error('Assembly GUID could not be resolved.');
-     }
-
-     const selector = {
-       modelObjectIds: [
-         {
-           modelId,
-           objectRuntimeIds: [runtimeId],
-           recursive: true
-         }
-       ]
-     };
-
-     const presentationBefore =
-       await api.viewer.getPresentation();
-
-     log('TRANSPARENCY TEST - BEFORE', {
-       modelId,
-       guid,
-       runtimeId,
-       nativeGhostMode: presentationBefore?.ghost
-     });
-
-     // Do not call isolateEntities().
-     // We need the surrounding objects to remain visible.
-
-     status('Applying transparency to loaded objects...');
-
-     // Record the test as active before the first appearance
-     // change, so Restore remains available if a later call fails.
-     transparencyTestActive = true;
-     transparencyTestSelector = selector;
-
-await api.viewer.setObjectState(
-  undefined,
-  {
-    opacity: 50
+// ============================================================
+// STAGE 2D.3B.7A
+// GHOST MODE API CAPABILITY INVESTIGATION
+// ============================================================
+
+async function inspectGhostApiCapabilities() {
+
+  if (!api) {
+    throw new Error(
+      'Connect to Trimble Connect before running diagnostics.'
+    );
   }
-);
 
-     status('Restoring selected assembly to full opacity...');
+  status('Inspecting available Ghost Mode API capabilities...');
 
-// Temporarily disabled for opacity testing.
-// We first need to confirm that the viewer
-// supports transparency through setObjectState().
+  // Only inspect method names and read the presentation.
+  // No viewer settings will be changed.
 
-// await api.viewer.setObjectState(
-//   selector,
-//   {
-//     visible: true,
-//     opacity: 1
-//   }
-// );
+  const getMethodNames = object => {
 
-     await api.viewer.setSelection(selector, 'set');
+    if (!object) return [];
 
-     await api.viewer.setCamera(selector);
+    const names = new Set();
+    let current = object;
+    let depth = 0;
 
-     const presentationAfter =
-       await api.viewer.getPresentation();
+    while (current && depth < 5) {
 
-     log('TRANSPARENCY TEST - AFTER', {
-       modelId,
-       guid,
-       runtimeId,
-       surroundingOpacity: 0.2,
-       assemblyOpacity: 1,
-       nativeGhostMode: presentationAfter?.ghost,
-       testActive: transparencyTestActive
-     });
+      try {
 
-     status(
-       'Transparency test applied. Check the model appearance. ' +
-       'Use Restore Appearance when finished.'
-     );
+        for (const name of Object.getOwnPropertyNames(current)) {
 
-   } finally {
+          if (name === 'constructor') continue;
 
-     transparencyTestBusy = false;
-   }
- }
+          try {
 
- async function restoreAssemblyAppearance() {
+            if (typeof object[name] === 'function') {
+              names.add(name);
+            }
 
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
+          } catch (_) {
+            // Ignore inaccessible properties.
+          }
+        }
 
-   if (transparencyTestBusy) {
-     throw new Error('A transparency operation is already running.');
-   }
+      } catch (_) {
+        // Ignore inaccessible objects.
+      }
 
-   if (!transparencyTestActive) {
-     status('No active transparency test to restore.');
-     return;
-   }
+      current = Object.getPrototypeOf(current);
+      depth++;
+    }
 
-   transparencyTestBusy = true;
+    return Array.from(names).sort();
+  };
 
-   try {
+  const viewerMethods = getMethodNames(api.viewer);
+  const viewMethods = getMethodNames(api.view);
 
-     status('Restoring model appearance...');
+  const relevantPattern =
+    /ghost|present|transparen|visual|display|render|state|command|mode|style/i;
 
-     // Reset test-wide opacity and visibility.
-     // Existing custom appearance overrides may not be
-     // recoverable using this generic reset.
+  const relevantViewerMethods =
+    viewerMethods.filter(name =>
+      relevantPattern.test(name)
+    );
 
-     await api.viewer.setObjectState(
-       undefined,
-       {
-         visible: 'reset',
-         opacity: 1
-       }
-     );
+  const relevantViewMethods =
+    viewMethods.filter(name =>
+      relevantPattern.test(name)
+    );
 
-     transparencyTestActive = false;
-     transparencyTestSelector = null;
+  const candidateNames = [
+    'setPresentation',
+    'updatePresentation',
+    'setGhostMode',
+    'setGhost',
+    'setViewerMode',
+    'executeCommand',
+    'runCommand',
+    'setObjectState',
+    'getPresentation'
+  ];
 
-     log('TRANSPARENCY TEST - RESTORED', {
-       opacityResetTo: 1,
-       visibilityReset: true
-     });
+  const candidates = candidateNames.map(name => ({
+    method: name,
+    available:
+      typeof api.viewer?.[name] === 'function'
+  }));
 
-     status(
-       'Test appearance reset. If the original model had ' +
-       'custom appearance overrides, reload the viewer to ' +
-       'recover those settings.'
-     );
+  let presentation = null;
+  let presentationError = null;
 
-   } finally {
+  try {
 
-     transparencyTestBusy = false;
-   }
- }
+    if (typeof api.viewer.getPresentation === 'function') {
+
+      presentation =
+        await api.viewer.getPresentation();
+
+    }
+
+  } catch (error) {
+
+    presentationError = error.message;
+  }
+
+  const result = {
+    stage: '2D.3B.7A',
+    nativeGhostMode: presentation?.ghost ?? 'Not reported',
+    candidateMethods: candidates,
+    relevantViewerMethods,
+    relevantViewMethods,
+    allViewerMethods: viewerMethods,
+    allViewMethods: viewMethods,
+    presentationError
+  };
+
+  log('GHOST MODE API CAPABILITY REPORT', result);
+
+  const availableCandidates =
+    candidates.filter(item => item.available);
+
+  const possibleSetters =
+    availableCandidates.filter(item =>
+      item.method !== 'getPresentation' &&
+      item.method !== 'setObjectState'
+    );
+
+  if (possibleSetters.length > 0) {
+
+    status(
+      'Potential API methods detected. ' +
+      'Review the diagnostic report before testing.'
+    );
+
+  } else {
+
+    status(
+      'API inspection complete. No named native Ghost Mode ' +
+      'setter detected. Review the diagnostic report.'
+    );
+  }
+
+  return result;
+}
+
+// ============================================================
+// STAGE 2D.3B.7B
+// VIEWER SETTINGS & OPACITY INVESTIGATION
+// READ-ONLY DIAGNOSTICS
+// ============================================================
+
+async function inspectViewerSettings() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  status('Reading Trimble Connect viewer settings...');
+
+  const settings =
+    await api.viewer.getSettings();
+
+  const presentation =
+    await api.viewer.getPresentation();
+
+  const settingsKeys =
+    settings && typeof settings === 'object'
+      ? Object.keys(settings)
+      : [];
+
+  const ghostRelatedKeys =
+    settingsKeys.filter(key =>
+      /ghost|opacity|transparen|visual|render|display/i.test(key)
+    );
+
+  const report = {
+    stage: '2D.3B.7B',
+    test: 'Viewer Settings',
+    nativeGhostMode: presentation?.ghost ?? 'Not reported',
+    viewerSettings: settings,
+    settingsKeys,
+    ghostRelatedKeys,
+    documentedSettings: [
+      'assemblySelection',
+      'zoomToFitRatio'
+    ],
+    getSettingsAvailable:
+      typeof api.viewer.getSettings === 'function',
+    setSettingsAvailable:
+      typeof api.viewer.setSettings === 'function',
+    settingsModified: false
+  };
+
+  log('VIEWER SETTINGS DIAGNOSTIC REPORT', report);
+
+  status(
+    'Viewer settings read successfully. ' +
+    'Review the diagnostic report.'
+  );
+
+  return report;
+}
+
+async function inspectOpacitySupport() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  status('Inspecting opacity and object-state capabilities...');
+
+  const presentation =
+    await api.viewer.getPresentation();
+
+  const settings =
+    await api.viewer.getSettings();
+
+  const viewer = api.viewer;
+
+  const report = {
+    stage: '2D.3B.7B',
+    test: 'Opacity and Object State',
+    nativeGhostMode: presentation?.ghost ?? 'Not reported',
+
+    methods: {
+      setOpacity:
+        typeof viewer.setOpacity === 'function',
+      setObjectState:
+        typeof viewer.setObjectState === 'function',
+      getPresentation:
+        typeof viewer.getPresentation === 'function',
+      getSettings:
+        typeof viewer.getSettings === 'function'
+    },
+
+    documentedOpacityRange: {
+      minimum: 0,
+      maximum: 100,
+      parameterName: 'transparency',
+      scope: '3D viewer'
+    },
+
+    objectSpecificControl: {
+      method: 'setObjectState',
+      acceptsObjectSelector: true,
+      requiresObjectState: true
+    },
+
+    presentationProperties:
+      presentation && typeof presentation === 'object'
+        ? Object.keys(presentation)
+        : [],
+
+    settingsProperties:
+      settings && typeof settings === 'object'
+        ? Object.keys(settings)
+        : [],
+
+    methodsInvoked: [
+      'getPresentation',
+      'getSettings'
+    ],
+
+    viewerModified: false
+  };
+
+  log('OPACITY SUPPORT DIAGNOSTIC REPORT', report);
+
+  status(
+    'Opacity investigation complete. ' +
+    'No viewer appearance changes were made.'
+  );
+
+  return report;
+}
+
+// ============================================================
+// STAGE 2D.3B.7C
+// CONTROLLED TRANSPARENCY TEST
+// ============================================================
+
+let transparencyTestActive = false;
+let transparencyTestSelector = null;
+let transparencyTestBusy = false;
+
+async function testAssemblyTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (transparencyTestBusy) {
+    throw new Error('A transparency operation is already running.');
+  }
+
+  if (transparencyTestActive) {
+    throw new Error(
+      'Restore the previous transparency test before starting another.'
+    );
+  }
+
+  const guid = el('guid').value.trim().toLowerCase();
+  const modelId = el('model').value;
+
+  if (!validGuid(guid)) {
+    throw new Error('Enter a valid Tekla assembly GUID.');
+  }
+
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
+
+  transparencyTestBusy = true;
+
+  try {
+
+    status('Resolving assembly for transparency test...');
+
+    const runtimeIds =
+      await api.viewer.convertToObjectRuntimeIds(
+        modelId,
+        [guid]
+      );
+
+    const runtimeId = runtimeIds && runtimeIds[0];
+
+    if (!Number.isInteger(runtimeId)) {
+      throw new Error('Assembly GUID could not be resolved.');
+    }
+
+    const selector = {
+      modelObjectIds: [
+        {
+          modelId,
+          objectRuntimeIds: [runtimeId],
+          recursive: true
+        }
+      ]
+    };
+
+    const presentationBefore =
+      await api.viewer.getPresentation();
+
+    log('TRANSPARENCY TEST - BEFORE', {
+      modelId,
+      guid,
+      runtimeId,
+      nativeGhostMode: presentationBefore?.ghost
+    });
+
+    // Do not call isolateEntities().
+    // We need surrounding objects to remain visible.
+
+    status('Applying transparency to loaded objects...');
+
+    // Record the test before modifying appearance.
+    transparencyTestActive = true;
+    transparencyTestSelector = selector;
+
+    // Original experimental test retained.
+    // The main navigation will use Stage 6D/6E instead.
+
+    await api.viewer.setObjectState(
+      undefined,
+      {
+        opacity: 50
+      }
+    );
+
+    status('Restoring selected assembly to full opacity...');
+
+    // Original experimental assembly override remains
+    // disabled. The proven fix is in Stage 6E.
+
+    // await api.viewer.setObjectState(
+    //   selector,
+    //   {
+    //     visible: true,
+    //     opacity: 1
+    //   }
+    // );
+
+    await api.viewer.setSelection(selector, 'set');
+
+    await api.viewer.setCamera(selector);
+
+    const presentationAfter =
+      await api.viewer.getPresentation();
+
+    log('TRANSPARENCY TEST - AFTER', {
+      modelId,
+      guid,
+      runtimeId,
+      surroundingOpacity: 0.2,
+      assemblyOpacity: 1,
+      nativeGhostMode: presentationAfter?.ghost,
+      testActive: transparencyTestActive
+    });
+
+    status(
+      'Transparency test applied. Check the model appearance. ' +
+      'Use Restore Appearance when finished.'
+    );
+
+  } finally {
+
+    transparencyTestBusy = false;
+  }
+}
+
+async function restoreAssemblyAppearance() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (transparencyTestBusy) {
+    throw new Error('A transparency operation is already running.');
+  }
+
+  if (!transparencyTestActive) {
+    status('No active transparency test to restore.');
+    return;
+  }
+
+  transparencyTestBusy = true;
+
+  try {
+
+    status('Restoring model appearance...');
+
+    // Reset test-wide opacity and visibility.
+    // Existing custom appearance overrides may not be
+    // recoverable using this generic reset.
+
+    await api.viewer.setObjectState(
+      undefined,
+      {
+        visible: 'reset',
+        opacity: 1
+      }
+    );
+
+    transparencyTestActive = false;
+    transparencyTestSelector = null;
+
+    log('TRANSPARENCY TEST - RESTORED', {
+      opacityResetTo: 1,
+      visibilityReset: true
+    });
+
+    status(
+      'Test appearance reset. If the original model had ' +
+      'custom appearance overrides, reload the viewer to ' +
+      'recover those settings.'
+    );
+
+  } finally {
+
+    transparencyTestBusy = false;
+  }
+}
 
 
- // ============================================================
- // STAGE 2D.3B.7C.2 - SINGLE OBJECT APPEARANCE TEST
- // ============================================================
+// ============================================================
+// STAGE 2D.3B.7C.2 - SINGLE OBJECT APPEARANCE TEST
+// ============================================================
 
- let appearanceTestSelector = null;
- let appearanceTestBusy = false;
+let appearanceTestSelector = null;
+let appearanceTestBusy = false;
 
- async function getAppearanceTestSelector() {
+async function getAppearanceTestSelector() {
 
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
 
-   const guid = el('guid').value.trim().toLowerCase();
-   const modelId = el('model').value;
+  const guid = el('guid').value.trim().toLowerCase();
+  const modelId = el('model').value;
 
-   if (!validGuid(guid)) {
-     throw new Error('Enter a valid Tekla assembly GUID.');
-   }
+  if (!validGuid(guid)) {
+    throw new Error('Enter a valid Tekla assembly GUID.');
+  }
 
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
 
-   const runtimeIds =
-     await api.viewer.convertToObjectRuntimeIds(
-       modelId,
-       [guid]
-     );
+  const runtimeIds =
+    await api.viewer.convertToObjectRuntimeIds(
+      modelId,
+      [guid]
+    );
 
-   const runtimeId = runtimeIds && runtimeIds[0];
+  const runtimeId = runtimeIds && runtimeIds[0];
 
-   if (!Number.isInteger(runtimeId)) {
-     throw new Error('Assembly GUID could not be resolved.');
-   }
+  if (!Number.isInteger(runtimeId)) {
+    throw new Error('Assembly GUID could not be resolved.');
+  }
 
-   const selector = {
-     modelObjectIds: [
-       {
-         modelId,
-         objectRuntimeIds: [runtimeId],
-         recursive: true
-       }
-     ]
-   };
+  const selector = {
+    modelObjectIds: [{
+      modelId,
+      objectRuntimeIds: [runtimeId],
+      recursive: true
+    }]
+  };
 
-   appearanceTestSelector = selector;
+  appearanceTestSelector = selector;
 
-   log('APPEARANCE TEST - OBJECT RESOLVED', {
-     modelId,
-     guid,
-     runtimeId
-   });
+  log('APPEARANCE TEST - OBJECT RESOLVED', {
+    modelId,
+    guid,
+    runtimeId
+  });
 
-   return selector;
- }
+  return selector;
+}
 
- async function testAssemblyColour() {
+async function testAssemblyColour() {
 
-   if (appearanceTestBusy) {
-     throw new Error('An appearance test is already running.');
-   }
+  if (appearanceTestBusy) {
+    throw new Error('An appearance test is already running.');
+  }
 
-   appearanceTestBusy = true;
+  appearanceTestBusy = true;
 
-   try {
+  try {
 
-     const selector = await getAppearanceTestSelector();
+    const selector = await getAppearanceTestSelector();
 
-     status('Testing assembly colour...');
+    status('Testing assembly colour...');
 
-     await api.viewer.setObjectState(
-       selector,
-       {
-         color: '#FF0000'
-       }
-     );
+    await api.viewer.setObjectState(
+      selector,
+      {
+        color: '#FF0000'
+      }
+    );
 
-     log('APPEARANCE TEST - COLOUR', {
-       stage: '2D.3B.7C.2',
-       requestedColor: '#FF0000',
-       operationCompleted: true
-     });
+    log('APPEARANCE TEST - COLOUR', {
+      stage: '2D.3B.7C.2',
+      requestedColor: '#FF0000',
+      operationCompleted: true
+    });
 
-     status(
-       'Colour command completed. Check whether the assembly is red.'
-     );
+    status(
+      'Colour command completed. Check whether the assembly is red.'
+    );
 
-   } finally {
-     appearanceTestBusy = false;
-   }
- }
+  } finally {
+    appearanceTestBusy = false;
+  }
+}
 
- async function testSingleObjectOpacity() {
+async function testSingleObjectOpacity() {
 
-   if (appearanceTestBusy) {
-     throw new Error('An appearance test is already running.');
-   }
+  if (appearanceTestBusy) {
+    throw new Error('An appearance test is already running.');
+  }
 
-   appearanceTestBusy = true;
+  appearanceTestBusy = true;
 
-   try {
+  try {
 
-     const selector = await getAppearanceTestSelector();
+    const selector = await getAppearanceTestSelector();
 
-     status('Testing assembly opacity...');
+    status('Testing assembly opacity...');
 
-     await api.viewer.setObjectState(
-       selector,
-       {
-         opacity: 0.2
-       }
-     );
+    await api.viewer.setObjectState(
+      selector,
+      {
+        opacity: 0.2
+      }
+    );
 
-     log('APPEARANCE TEST - OPACITY', {
-       stage: '2D.3B.7C.2',
-       requestedOpacity: 0.2,
-       operationCompleted: true
-     });
+    log('APPEARANCE TEST - OPACITY', {
+      stage: '2D.3B.7C.2',
+      requestedOpacity: 0.2,
+      operationCompleted: true
+    });
 
-     status(
-       'Opacity command completed. Check whether the assembly is transparent.'
-     );
+    status(
+      'Opacity command completed. Check whether the assembly is transparent.'
+    );
 
-   } finally {
-     appearanceTestBusy = false;
-   }
- }
+  } finally {
+    appearanceTestBusy = false;
+  }
+}
 
 // ============================================================
 // STAGE 2D.3B.7C.3 - COLOUR RESET INVESTIGATION
@@ -869,1405 +875,1375 @@ async function resetSingleObjectAppearance() {
     );
 
   } finally {
-
     appearanceTestBusy = false;
+  }
+}
 
+// ============================================================
+// STAGE 2D.3B.7C.4 - GHOST-STYLE TRANSPARENCY TEST
+// ============================================================
+
+let ghostStyleTestActive = false;
+let ghostStyleTestBusy = false;
+let ghostStyleTestSelector = null;
+
+async function testGhostStyleTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (ghostStyleTestBusy) {
+    throw new Error('A Ghost-style operation is already running.');
+  }
+
+  if (ghostStyleTestActive) {
+    throw new Error('Restore the previous Ghost-style test first.');
+  }
+
+  const guid = el('guid').value.trim().toLowerCase();
+  const modelId = el('model').value;
+
+  if (!validGuid(guid)) {
+    throw new Error('Enter a valid Tekla assembly GUID.');
+  }
+
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
+
+  ghostStyleTestBusy = true;
+
+  try {
+
+    status('Resolving assembly for Ghost-style test...');
+
+    const runtimeIds =
+      await api.viewer.convertToObjectRuntimeIds(
+        modelId,
+        [guid]
+      );
+
+    const runtimeId = runtimeIds && runtimeIds[0];
+
+    if (!Number.isInteger(runtimeId)) {
+      throw new Error('Assembly GUID could not be resolved.');
+    }
+
+    const selector = {
+      modelObjectIds: [{
+        modelId,
+        objectRuntimeIds: [runtimeId],
+        recursive: true
+      }]
+    };
+
+    ghostStyleTestActive = true;
+    ghostStyleTestSelector = selector;
+
+    status('Making surrounding model transparent...');
+
+    // Original experimental test retained.
+    await api.viewer.setObjectState(
+      undefined,
+      {
+        opacity: 0.2
+      }
+    );
+
+    status('Restoring selected assembly to solid...');
+
+    await api.viewer.setObjectState(
+      selector,
+      {
+        opacity: 1
+      }
+    );
+
+    // Preserve original IFC material colours.
+    await api.viewer.setSelection(selector, 'set');
+    await api.viewer.setCamera(selector);
+
+    log('GHOST-STYLE TRANSPARENCY TEST', {
+      stage: '2D.3B.7C.4',
+      modelId,
+      guid,
+      runtimeId,
+      surroundingRequestedOpacity: 0.2,
+      selectedRequestedOpacity: 1,
+      selectedColourModified: false,
+      active: true
+    });
+
+    status(
+      'Ghost-style appearance requested. Check whether ' +
+      'surrounding steel is transparent and the assembly is solid.'
+    );
+
+  } finally {
+    ghostStyleTestBusy = false;
+  }
+}
+
+async function restoreGhostStyleTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (ghostStyleTestBusy) {
+    throw new Error('A Ghost-style operation is already running.');
+  }
+
+  if (!ghostStyleTestActive) {
+    status('No active Ghost-style test to restore.');
+    return;
+  }
+
+  ghostStyleTestBusy = true;
+
+  try {
+
+    status('Restoring model opacity...');
+
+    await api.viewer.setObjectState(
+      undefined,
+      {
+        opacity: 1
+      }
+    );
+
+    await api.viewer.setObjectState(
+      ghostStyleTestSelector,
+      {
+        color: 'reset'
+      }
+    );
+
+    ghostStyleTestActive = false;
+    ghostStyleTestSelector = null;
+
+    log('GHOST-STYLE APPEARANCE RESTORE', {
+      stage: '2D.3B.7C.4',
+      requestedModelOpacity: 1,
+      selectedColourReset: true
+    });
+
+    status(
+      'Appearance restoration requested. ' +
+      'Check that the original model colours and opacity have returned.'
+    );
+
+  } finally {
+    ghostStyleTestBusy = false;
+  }
+}
+
+// ============================================================
+// STAGE 2D.3B.7C.5 - DOES NOT EQUAL TEST
+// ============================================================
+
+let doesNotEqualTestBusy = false;
+let doesNotEqualTestSelector = null;
+let doesNotEqualTestActive = false;
+
+async function resolveDoesNotEqualAssembly(modelId, guid) {
+
+  const runtimeIds =
+    await api.viewer.convertToObjectRuntimeIds(
+      modelId,
+      [guid]
+    );
+
+  const runtimeId = runtimeIds && runtimeIds[0];
+
+  if (!Number.isInteger(runtimeId)) {
+    throw new Error(
+      'Could not resolve assembly GUID: ' + guid
+    );
+  }
+
+  return {
+    runtimeId,
+    selector: {
+      modelObjectIds: [{
+        modelId,
+        objectRuntimeIds: [runtimeId],
+        recursive: true
+      }]
+    }
+  };
+}
+
+async function testDoesNotEqualTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (doesNotEqualTestBusy) {
+    throw new Error('A Does Not Equal test is running.');
+  }
+
+  if (doesNotEqualTestActive) {
+    throw new Error('Restore the previous test first.');
+  }
+
+  if (ghostStyleTestActive || transparencyTestActive) {
+    throw new Error(
+      'Restore the earlier transparency test before continuing.'
+    );
+  }
+
+  const modelId = el('model').value;
+  const selectedGuid = el('guid').value.trim().toLowerCase();
+  const surroundingGuid =
+    el('excludedTestGuid').value.trim().toLowerCase();
+
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
+
+  if (!validGuid(selectedGuid) ||
+      !validGuid(surroundingGuid)) {
+    throw new Error('Enter two valid assembly GUIDs.');
+  }
+
+  if (selectedGuid === surroundingGuid) {
+    throw new Error(
+      'The two assembly GUIDs must be different.'
+    );
+  }
+
+  doesNotEqualTestBusy = true;
+
+  try {
+
+    status('Resolving both assemblies...');
+
+    const selected =
+      await resolveDoesNotEqualAssembly(
+        modelId,
+        selectedGuid
+      );
+
+    const surrounding =
+      await resolveDoesNotEqualAssembly(
+        modelId,
+        surroundingGuid
+      );
+
+    if (selected.runtimeId === surrounding.runtimeId) {
+      throw new Error(
+        'Both GUIDs resolved to the same runtime object.'
+      );
+    }
+
+    log('DOES NOT EQUAL - COMPARISON', {
+      stage: '2D.3B.7C.5',
+      selectedGuid,
+      surroundingGuid,
+      selectedRuntimeId: selected.runtimeId,
+      surroundingRuntimeId: surrounding.runtimeId,
+      doesNotEqual:
+        surrounding.runtimeId !== selected.runtimeId
+    });
+
+    if (surrounding.runtimeId !== selected.runtimeId) {
+
+      doesNotEqualTestSelector = surrounding.selector;
+      doesNotEqualTestActive = true;
+
+      status('Making the surrounding assembly transparent...');
+
+      await api.viewer.setObjectState(
+        surrounding.selector,
+        {
+          opacity: 0.2
+        }
+      );
+    }
+
+    // Do not modify the selected assembly's appearance.
+    await api.viewer.setSelection(
+      selected.selector,
+      'set'
+    );
+
+    await api.viewer.setCamera(
+      selected.selector
+    );
+
+    log('DOES NOT EQUAL - TEST COMPLETE', {
+      stage: '2D.3B.7C.5',
+      surroundingRequestedOpacity: 0.2,
+      selectedAppearanceModified: false,
+      testActive: doesNotEqualTestActive
+    });
+
+    status(
+      'Does Not Equal test completed. ' +
+      'Check that only the second assembly became transparent.'
+    );
+
+  } finally {
+    doesNotEqualTestBusy = false;
+  }
+}
+
+async function restoreDoesNotEqualTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (doesNotEqualTestBusy) {
+    throw new Error('A Does Not Equal test is running.');
+  }
+
+  if (!doesNotEqualTestActive ||
+      !doesNotEqualTestSelector) {
+    status('No active Does Not Equal test to restore.');
+    return;
+  }
+
+  doesNotEqualTestBusy = true;
+
+  try {
+
+    status('Restoring surrounding assembly opacity...');
+
+    await api.viewer.setObjectState(
+      doesNotEqualTestSelector,
+      {
+        opacity: 1
+      }
+    );
+
+    doesNotEqualTestActive = false;
+    doesNotEqualTestSelector = null;
+
+    log('DOES NOT EQUAL - RESTORE', {
+      stage: '2D.3B.7C.5',
+      requestedOpacity: 1,
+      completed: true
+    });
+
+    status(
+      'Surrounding assembly opacity restored. ' +
+      'Check its original appearance.'
+    );
+
+  } finally {
+    doesNotEqualTestBusy = false;
+  }
+}
+
+// ============================================================
+// STAGE 2D.3B.7C.6A - IFC OBJECT DISCOVERY
+// READ-ONLY DIAGNOSTICS
+// ============================================================
+
+let objectDiscoveryBusy = false;
+
+async function inspectIfcObjectDiscovery() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (objectDiscoveryBusy) {
+    throw new Error('Object discovery is already running.');
+  }
+
+  const modelId = el('model').value;
+  const guid = el('guid').value.trim().toLowerCase();
+
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
+
+  if (!validGuid(guid)) {
+    throw new Error('Enter a valid Tekla assembly GUID.');
+  }
+
+  objectDiscoveryBusy = true;
+
+  try {
+
+    status('Inspecting IFC object discovery capabilities...');
+
+    function collectMethods(object) {
+
+      const methods = new Set();
+      let current = object;
+      let depth = 0;
+
+      while (current && depth < 5) {
+
+        for (const name of Object.getOwnPropertyNames(current)) {
+
+          if (name === 'constructor') continue;
+
+          try {
+            if (typeof object[name] === 'function') {
+              methods.add(name);
+            }
+          } catch (_) {
+            // Ignore inaccessible properties.
+          }
+        }
+
+        current = Object.getPrototypeOf(current);
+        depth++;
+      }
+
+      return Array.from(methods).sort();
+    }
+
+    const viewerMethods = collectMethods(api.viewer);
+
+    const discoveryMethods = viewerMethods.filter(name =>
+      /object|entity|hierarch|tree|child|parent|model|propert|assembl|guid/i
+        .test(name)
+    );
+
+    const candidateNames = [
+      'getObjects',
+      'getObject',
+      'getObjectTree',
+      'getObjectHierarchy',
+      'getModelObjects',
+      'getModelObjectIds',
+      'getObjectProperties',
+      'getObjectChildren',
+      'getChildren',
+      'getEntities',
+      'getModels',
+      'getSelection',
+      'getObjectData',
+      'convertToObjectRuntimeIds',
+      'convertToObjectIds'
+    ];
+
+    const candidateMethods = candidateNames.map(name => ({
+      name,
+      available: typeof api.viewer[name] === 'function'
+    }));
+
+    const models = await api.viewer.getModels();
+
+    const runtimeIds =
+      await api.viewer.convertToObjectRuntimeIds(
+        modelId,
+        [guid]
+      );
+
+    const selectedRuntimeId = runtimeIds && runtimeIds[0];
+
+    if (!Number.isInteger(selectedRuntimeId)) {
+      throw new Error(
+        'Selected assembly GUID could not be resolved.'
+      );
+    }
+
+    const selectedSelector = {
+      modelObjectIds: [{
+        modelId,
+        objectRuntimeIds: [selectedRuntimeId],
+        recursive: true
+      }]
+    };
+
+    const report = {
+      stage: '2D.3B.7C.6A',
+      mode: 'Read-only',
+      modelId,
+      selectedGuid: guid,
+      selectedRuntimeId,
+      selectedSelector,
+      loadedModelCount: Array.isArray(models)
+        ? models.length
+        : null,
+      loadedModels: models,
+      discoveryMethods,
+      candidateMethods,
+      apiNamespaces: Object.keys(api || {}),
+      notes: [
+        'No object appearance was modified.',
+        'No isolation or camera operation was performed.',
+        'Available method names do not confirm their signatures.',
+        'Complete IFC hierarchy retrieval is not yet proven.',
+        'Recursive selection does not provide child IDs directly.'
+      ]
+    };
+
+    log('STAGE 2D.3B.7C.6A - OBJECT DISCOVERY', report);
+
+    status(
+      'Object discovery inspection completed. ' +
+      'Copy the diagnostic report for review.'
+    );
+
+    return report;
+
+  } finally {
+    objectDiscoveryBusy = false;
+  }
+}
+
+// ============================================================
+// STAGE 2D.3B.7C.6B - IFC HIERARCHY RETRIEVAL
+// READ-ONLY DIAGNOSTICS
+// ============================================================
+
+let hierarchyTestBusy = false;
+
+async function inspectIfcHierarchy() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (hierarchyTestBusy) {
+    throw new Error('Hierarchy inspection is already running.');
+  }
+
+  const modelId = el('model').value;
+  const guid = el('guid').value.trim().toLowerCase();
+
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
+
+  if (!validGuid(guid)) {
+    throw new Error('Enter a valid Tekla assembly GUID.');
+  }
+
+  hierarchyTestBusy = true;
+
+  try {
+
+    status('Resolving selected IFC assembly...');
+
+    const runtimeIds =
+      await api.viewer.convertToObjectRuntimeIds(
+        modelId,
+        [guid]
+      );
+
+    const runtimeId = runtimeIds && runtimeIds[0];
+
+    if (!Number.isInteger(runtimeId)) {
+      throw new Error('Assembly GUID could not be resolved.');
+    }
+
+    async function probe(name, callback) {
+
+      try {
+
+        const result = await callback();
+
+        return {
+          method: name,
+          success: true,
+          count: Array.isArray(result)
+            ? result.length
+            : null,
+          sample: Array.isArray(result)
+            ? result.slice(0, 5)
+            : result
+        };
+
+      } catch (error) {
+
+        return {
+          method: name,
+          success: false,
+          error: error.message
+        };
+      }
+    }
+
+    status('Reading assembly children and parents...');
+
+    const directChildren = await probe(
+      'getHierarchyChildren - direct',
+      () => api.viewer.getHierarchyChildren(
+        modelId,
+        [runtimeId]
+      )
+    );
+
+    const recursiveChildren = await probe(
+      'getHierarchyChildren - recursive',
+      () => api.viewer.getHierarchyChildren(
+        modelId,
+        [runtimeId],
+        undefined,
+        true
+      )
+    );
+
+    const directParents = await probe(
+      'getHierarchyParents - direct',
+      () => api.viewer.getHierarchyParents(
+        modelId,
+        [runtimeId]
+      )
+    );
+
+    status('Reading IFC object information...');
+
+    const selectedSelector = {
+      modelObjectIds: [{
+        modelId,
+        objectRuntimeIds: [runtimeId],
+        recursive: true
+      }]
+    };
+
+    const selectedObjects = await probe(
+      'getObjects - selected assembly',
+      () => api.viewer.getObjects(selectedSelector)
+    );
+
+    const allObjects = await probe(
+      'getObjects - all viewer objects',
+      () => api.viewer.getObjects()
+    );
+
+    const report = {
+      stage: '2D.3B.7C.6B',
+      mode: 'Read-only',
+      modelId,
+      guid,
+      selectedRuntimeId: runtimeId,
+      tests: {
+        directChildren,
+        recursiveChildren,
+        directParents,
+        selectedObjects,
+        allObjects
+      },
+      viewerAppearanceModified: false,
+      notes: [
+        'Only read-only API methods were called.',
+        'Samples are limited to five entries per result.',
+        'Object counts and identifier formats require review.',
+        'All-viewer results may include other loaded models.'
+      ]
+    };
+
+    log(
+      'STAGE 2D.3B.7C.6B - IFC HIERARCHY REPORT',
+      report
+    );
+
+    status(
+      'Hierarchy inspection completed. ' +
+      'Copy the diagnostic report for review.'
+    );
+
+    return report;
+
+  } finally {
+    hierarchyTestBusy = false;
+  }
+}
+
+// ============================================================
+// STAGE 2D.3B.7C.6C
+// CONTROLLED AUTOMATIC SURROUNDING TRANSPARENCY
+// ============================================================
+
+let autoTransparencyBusy = false;
+let autoTransparencyActive = false;
+let autoTransparencySelector = null;
+let autoTransparencyDetails = null;
+
+const AUTO_TRANSPARENCY_BATCH_SIZE = 10;
+
+async function testAutomaticTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (autoTransparencyBusy) {
+    throw new Error('Automatic transparency test is running.');
+  }
+
+  if (autoTransparencyActive) {
+    throw new Error('Restore the previous automatic test first.');
+  }
+
+  if (
+    transparencyTestActive ||
+    ghostStyleTestActive ||
+    doesNotEqualTestActive
+  ) {
+    throw new Error(
+      'Restore all earlier transparency tests before continuing.'
+    );
+  }
+
+  const modelId = el('model').value;
+  const guid = el('guid').value.trim().toLowerCase();
+
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
+
+  if (!validGuid(guid)) {
+    throw new Error('Enter a valid Tekla assembly GUID.');
+  }
+
+  autoTransparencyBusy = true;
+
+  try {
+
+    status('Resolving selected assembly...');
+
+    const runtimeIds =
+      await api.viewer.convertToObjectRuntimeIds(
+        modelId,
+        [guid]
+      );
+
+    const selectedRuntimeId = runtimeIds && runtimeIds[0];
+
+    if (!Number.isInteger(selectedRuntimeId)) {
+      throw new Error('Assembly GUID could not be resolved.');
+    }
+
+    const selectedSelector = {
+      modelObjectIds: [{
+        modelId,
+        objectRuntimeIds: [selectedRuntimeId],
+        recursive: true
+      }]
+    };
+
+    status('Retrieving IFC object hierarchy...');
+
+    const allGroups = await api.viewer.getObjects();
+
+    const protectedGroups =
+      await api.viewer.getObjects(selectedSelector);
+
+    const allGroup = allGroups.find(
+      group => group.modelId === modelId
+    );
+
+    const protectedGroup = protectedGroups.find(
+      group => group.modelId === modelId
+    );
+
+    if (!allGroup || !Array.isArray(allGroup.objects)) {
+      throw new Error('Could not retrieve IFC model objects.');
+    }
+
+    if (
+      !protectedGroup ||
+      !Array.isArray(protectedGroup.objects)
+    ) {
+      throw new Error('Could not retrieve selected assembly objects.');
+    }
+
+    const allIds = allGroup.objects
+      .map(object => object.id)
+      .filter(Number.isInteger);
+
+    const protectedIds = new Set(
+      protectedGroup.objects
+        .map(object => object.id)
+        .filter(Number.isInteger)
+    );
+
+    protectedIds.add(selectedRuntimeId);
+
+    const parents = await api.viewer.getHierarchyParents(
+      modelId,
+      [selectedRuntimeId]
+    );
+
+    const ancestorIds = [];
+
+    for (const parent of parents || []) {
+      if (Number.isInteger(parent.id)) {
+        protectedIds.add(parent.id);
+        ancestorIds.push(parent.id);
+      }
+    }
+
+    const surroundingIds = Array.from(new Set(allIds))
+      .filter(id => !protectedIds.has(id));
+
+    const batchIds = surroundingIds.slice(
+      0,
+      AUTO_TRANSPARENCY_BATCH_SIZE
+    );
+
+    if (batchIds.length === 0) {
+      throw new Error('No surrounding objects were found.');
+    }
+
+    const surroundingSelector = {
+      modelObjectIds: [{
+        modelId,
+        objectRuntimeIds: batchIds,
+        recursive: false
+      }]
+    };
+
+    const details = {
+      stage: '2D.3B.7C.6C',
+      modelId,
+      selectedGuid: guid,
+      selectedRuntimeId,
+      totalObjectIds: allIds.length,
+      protectedObjectIds: Array.from(protectedIds).sort(
+        (a, b) => a - b
+      ),
+      ancestorIds,
+      surroundingObjectCount: surroundingIds.length,
+      batchIds,
+      requestedOpacity: 0.2,
+      recursive: false
+    };
+
+    log('AUTOMATIC TRANSPARENCY - PREPARATION', details);
+
+    autoTransparencySelector = surroundingSelector;
+    autoTransparencyDetails = details;
+    autoTransparencyActive = true;
+
+    status(
+      'Applying transparency to ' +
+      batchIds.length +
+      ' surrounding object IDs...'
+    );
+
+    await api.viewer.setObjectState(
+      surroundingSelector,
+      {
+        opacity: 0.2
+      }
+    );
+
+    log('AUTOMATIC TRANSPARENCY - APPLIED', {
+      ...details,
+      selectedAssemblyAppearanceModified: false,
+      restoreAvailable: true
+    });
+
+    status(
+      'Automatic transparency batch applied. ' +
+      'Inspect the model and use Restore Automatic Transparency.'
+    );
+
+  } finally {
+    autoTransparencyBusy = false;
+  }
+}
+
+async function restoreAutomaticTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (autoTransparencyBusy) {
+    throw new Error('Automatic transparency operation is running.');
+  }
+
+  if (!autoTransparencyActive || !autoTransparencySelector) {
+    status('No active automatic transparency test to restore.');
+    return;
+  }
+
+  autoTransparencyBusy = true;
+
+  try {
+
+    status('Restoring automatic transparency batch...');
+
+    await api.viewer.setObjectState(
+      autoTransparencySelector,
+      {
+        opacity: 1
+      }
+    );
+
+    log('AUTOMATIC TRANSPARENCY - RESTORED', {
+      stage: '2D.3B.7C.6C',
+      modelId: autoTransparencyDetails.modelId,
+      restoredIds: autoTransparencyDetails.batchIds,
+      requestedOpacity: 1,
+      completed: true
+    });
+
+    autoTransparencyActive = false;
+    autoTransparencySelector = null;
+    autoTransparencyDetails = null;
+
+    status(
+      'Automatic transparency batch restored. ' +
+      'Check that original appearance has returned.'
+    );
+
+  } finally {
+    autoTransparencyBusy = false;
   }
 }
 
 
- // ============================================================
- // STAGE 2D.3B.7C.4 - GHOST-STYLE TRANSPARENCY TEST
- // ============================================================
-
- let ghostStyleTestActive = false;
- let ghostStyleTestBusy = false;
- let ghostStyleTestSelector = null;
-
- async function testGhostStyleTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (ghostStyleTestBusy) {
-     throw new Error('A Ghost-style operation is already running.');
-   }
-
-   if (ghostStyleTestActive) {
-     throw new Error('Restore the previous Ghost-style test first.');
-   }
-
-   const guid = el('guid').value.trim().toLowerCase();
-   const modelId = el('model').value;
-
-   if (!validGuid(guid)) {
-     throw new Error('Enter a valid Tekla assembly GUID.');
-   }
-
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
-
-   ghostStyleTestBusy = true;
-
-   try {
-
-     status('Resolving assembly for Ghost-style test...');
-
-     const runtimeIds =
-       await api.viewer.convertToObjectRuntimeIds(
-         modelId,
-         [guid]
-       );
-
-     const runtimeId = runtimeIds && runtimeIds[0];
-
-     if (!Number.isInteger(runtimeId)) {
-       throw new Error('Assembly GUID could not be resolved.');
-     }
-
-     const selector = {
-       modelObjectIds: [
-         {
-           modelId,
-           objectRuntimeIds: [runtimeId],
-           recursive: true
-         }
-       ]
-     };
-
-     // Record state before changing appearance.
-     ghostStyleTestActive = true;
-     ghostStyleTestSelector = selector;
-
-     status('Making surrounding model transparent...');
-
-     // Apply 20% opacity to the viewer's loaded objects.
-     // The undefined selector is experimental for this scope.
-     await api.viewer.setObjectState(
-       undefined,
-       {
-         opacity: 0.2
-       }
-     );
-
-     status('Restoring selected assembly to solid...');
-
-     await api.viewer.setObjectState(
-       selector,
-       {
-         opacity: 1
-       }
-     );
-
-     // Do not set a colour override on the assembly.
-     // Its original IFC material colour should remain.
-     await api.viewer.setSelection(selector, 'set');
-     await api.viewer.setCamera(selector);
-
-     log('GHOST-STYLE TRANSPARENCY TEST', {
-       stage: '2D.3B.7C.4',
-       modelId,
-       guid,
-       runtimeId,
-       surroundingRequestedOpacity: 0.2,
-       selectedRequestedOpacity: 1,
-       selectedColourModified: false,
-       active: true
-     });
-
-     status(
-       'Ghost-style appearance requested. Check whether ' +
-       'surrounding steel is transparent and the assembly is solid.'
-     );
-
-   } finally {
-
-     ghostStyleTestBusy = false;
-
-   }
- }
-
- async function restoreGhostStyleTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (ghostStyleTestBusy) {
-     throw new Error('A Ghost-style operation is already running.');
-   }
-
-   if (!ghostStyleTestActive) {
-     status('No active Ghost-style test to restore.');
-     return;
-   }
-
-   ghostStyleTestBusy = true;
-
-   try {
-
-     status('Restoring model opacity...');
-
-     await api.viewer.setObjectState(
-       undefined,
-       {
-         opacity: 1
-       }
-     );
-
-     // Clear any colour override on the selected assembly
-     // without modifying opacity in the same call.
-     await api.viewer.setObjectState(
-       ghostStyleTestSelector,
-       {
-         color: 'reset'
-       }
-     );
-
-     ghostStyleTestActive = false;
-     ghostStyleTestSelector = null;
-
-     log('GHOST-STYLE APPEARANCE RESTORE', {
-       stage: '2D.3B.7C.4',
-       requestedModelOpacity: 1,
-       selectedColourReset: true
-     });
-
-     status(
-       'Appearance restoration requested. ' +
-       'Check that the original model colours and opacity have returned.'
-     );
-
-   } finally {
-
-     ghostStyleTestBusy = false;
-
-   }
- }
-
-
- // ============================================================
- // STAGE 2D.3B.7C.5 - DOES NOT EQUAL TEST
- // ============================================================
-
- let doesNotEqualTestBusy = false;
- let doesNotEqualTestSelector = null;
- let doesNotEqualTestActive = false;
-
- async function resolveDoesNotEqualAssembly(modelId, guid) {
-
-   const runtimeIds =
-     await api.viewer.convertToObjectRuntimeIds(
-       modelId,
-       [guid]
-     );
-
-   const runtimeId = runtimeIds && runtimeIds[0];
-
-   if (!Number.isInteger(runtimeId)) {
-     throw new Error(
-       'Could not resolve assembly GUID: ' + guid
-     );
-   }
-
-   return {
-     runtimeId,
-     selector: {
-       modelObjectIds: [{
-         modelId,
-         objectRuntimeIds: [runtimeId],
-         recursive: true
-       }]
-     }
-   };
- }
-
- async function testDoesNotEqualTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (doesNotEqualTestBusy) {
-     throw new Error('A Does Not Equal test is running.');
-   }
-
-   if (doesNotEqualTestActive) {
-     throw new Error('Restore the previous test first.');
-   }
-
-   if (ghostStyleTestActive || transparencyTestActive) {
-     throw new Error(
-       'Restore the earlier transparency test before continuing.'
-     );
-   }
-
-   const modelId = el('model').value;
-   const selectedGuid = el('guid').value.trim().toLowerCase();
-   const surroundingGuid =
-     el('excludedTestGuid').value.trim().toLowerCase();
-
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
-
-   if (!validGuid(selectedGuid) ||
-       !validGuid(surroundingGuid)) {
-     throw new Error('Enter two valid assembly GUIDs.');
-   }
-
-   if (selectedGuid === surroundingGuid) {
-     throw new Error(
-       'The two assembly GUIDs must be different.'
-     );
-   }
-
-   doesNotEqualTestBusy = true;
-
-   try {
-
-     status('Resolving both assemblies...');
-
-     const selected =
-       await resolveDoesNotEqualAssembly(
-         modelId,
-         selectedGuid
-       );
-
-     const surrounding =
-       await resolveDoesNotEqualAssembly(
-         modelId,
-         surroundingGuid
-       );
-
-     if (selected.runtimeId === surrounding.runtimeId) {
-       throw new Error(
-         'Both GUIDs resolved to the same runtime object.'
-       );
-     }
-
-     log('DOES NOT EQUAL - COMPARISON', {
-       stage: '2D.3B.7C.5',
-       selectedGuid,
-       surroundingGuid,
-       selectedRuntimeId: selected.runtimeId,
-       surroundingRuntimeId: surrounding.runtimeId,
-       doesNotEqual:
-         surrounding.runtimeId !== selected.runtimeId
-     });
-
-     // This is the Does Not Equal condition.
-     // Only the second assembly is modified.
-
-     if (surrounding.runtimeId !== selected.runtimeId) {
-
-       // Store the selector before changing appearance,
-       // so restoration remains available if a later step fails.
-       doesNotEqualTestSelector = surrounding.selector;
-       doesNotEqualTestActive = true;
-
-       status('Making the surrounding assembly transparent...');
-
-       await api.viewer.setObjectState(
-         surrounding.selector,
-         {
-           opacity: 0.2
-         }
-       );
-     }
-
-     // Leave the selected assembly's colour and opacity untouched.
-     // This is important for preserving its original IFC appearance.
-
-     await api.viewer.setSelection(
-       selected.selector,
-       'set'
-     );
-
-     await api.viewer.setCamera(
-       selected.selector
-     );
-
-     log('DOES NOT EQUAL - TEST COMPLETE', {
-       stage: '2D.3B.7C.5',
-       surroundingRequestedOpacity: 0.2,
-       selectedAppearanceModified: false,
-       testActive: doesNotEqualTestActive
-     });
-
-     status(
-       'Does Not Equal test completed. ' +
-       'Check that only the second assembly became transparent.'
-     );
-
-   } finally {
-     doesNotEqualTestBusy = false;
-   }
- }
-
- async function restoreDoesNotEqualTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (doesNotEqualTestBusy) {
-     throw new Error('A Does Not Equal test is running.');
-   }
-
-   if (!doesNotEqualTestActive ||
-       !doesNotEqualTestSelector) {
-     status('No active Does Not Equal test to restore.');
-     return;
-   }
-
-   doesNotEqualTestBusy = true;
-
-   try {
-
-     status('Restoring surrounding assembly opacity...');
-
-     await api.viewer.setObjectState(
-       doesNotEqualTestSelector,
-       {
-         opacity: 1
-       }
-     );
-
-     doesNotEqualTestActive = false;
-     doesNotEqualTestSelector = null;
-
-     log('DOES NOT EQUAL - RESTORE', {
-       stage: '2D.3B.7C.5',
-       requestedOpacity: 1,
-       completed: true
-     });
-
-     status(
-       'Surrounding assembly opacity restored. ' +
-       'Check its original appearance.'
-     );
-
-   } finally {
-     doesNotEqualTestBusy = false;
-   }
- }
-
-
- // ============================================================
- // STAGE 2D.3B.7C.6A - IFC OBJECT DISCOVERY
- // READ-ONLY DIAGNOSTICS
- // ============================================================
-
- let objectDiscoveryBusy = false;
-
- async function inspectIfcObjectDiscovery() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (objectDiscoveryBusy) {
-     throw new Error('Object discovery is already running.');
-   }
-
-   const modelId = el('model').value;
-   const guid = el('guid').value.trim().toLowerCase();
-
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
-
-   if (!validGuid(guid)) {
-     throw new Error('Enter a valid Tekla assembly GUID.');
-   }
-
-   objectDiscoveryBusy = true;
-
-   try {
-
-     status('Inspecting IFC object discovery capabilities...');
-
-     // Read method names from the viewer and its prototypes.
-     // Do not execute unknown methods.
-
-     function collectMethods(object) {
-
-       const methods = new Set();
-       let current = object;
-       let depth = 0;
-
-       while (current && depth < 5) {
-
-         for (const name of Object.getOwnPropertyNames(current)) {
-
-           if (name === 'constructor') continue;
-
-           try {
-             if (typeof object[name] === 'function') {
-               methods.add(name);
-             }
-           } catch (_) {
-             // Ignore inaccessible properties.
-           }
-         }
-
-         current = Object.getPrototypeOf(current);
-         depth++;
-       }
-
-       return Array.from(methods).sort();
-     }
-
-     const viewerMethods = collectMethods(api.viewer);
-
-     const discoveryMethods = viewerMethods.filter(name =>
-       /object|entity|hierarch|tree|child|parent|model|propert|assembl|guid/i
-         .test(name)
-     );
-
-     const candidateNames = [
-       'getObjects',
-       'getObject',
-       'getObjectTree',
-       'getObjectHierarchy',
-       'getModelObjects',
-       'getModelObjectIds',
-       'getObjectProperties',
-       'getObjectChildren',
-       'getChildren',
-       'getEntities',
-       'getModels',
-       'getSelection',
-       'getObjectData',
-       'convertToObjectRuntimeIds',
-       'convertToObjectIds'
-     ];
-
-     const candidateMethods = candidateNames.map(name => ({
-       name,
-       available: typeof api.viewer[name] === 'function'
-     }));
-
-     // Only invoke methods whose signatures are already
-     // used successfully in this project.
-
-     const models = await api.viewer.getModels();
-
-     const runtimeIds =
-       await api.viewer.convertToObjectRuntimeIds(
-         modelId,
-         [guid]
-       );
-
-     const selectedRuntimeId = runtimeIds && runtimeIds[0];
-
-     if (!Number.isInteger(selectedRuntimeId)) {
-       throw new Error(
-         'Selected assembly GUID could not be resolved.'
-       );
-     }
-
-     const selectedSelector = {
-       modelObjectIds: [{
-         modelId,
-         objectRuntimeIds: [selectedRuntimeId],
-         recursive: true
-       }]
-     };
-
-     const report = {
-       stage: '2D.3B.7C.6A',
-       mode: 'Read-only',
-
-       modelId,
-       selectedGuid: guid,
-       selectedRuntimeId,
-
-       selectedSelector,
-
-       loadedModelCount: Array.isArray(models)
-         ? models.length
-         : null,
-
-       loadedModels: models,
-
-       discoveryMethods,
-       candidateMethods,
-
-       apiNamespaces: Object.keys(api || {}),
-
-       notes: [
-         'No object appearance was modified.',
-         'No isolation or camera operation was performed.',
-         'Available method names do not confirm their signatures.',
-         'Complete IFC hierarchy retrieval is not yet proven.',
-         'Recursive selection does not provide child IDs directly.'
-       ]
-     };
-
-     log('STAGE 2D.3B.7C.6A - OBJECT DISCOVERY', report);
-
-     status(
-       'Object discovery inspection completed. ' +
-       'Copy the diagnostic report for review.'
-     );
-
-     return report;
-
-   } finally {
-
-     objectDiscoveryBusy = false;
-
-   }
- }
-
-
-
- // ============================================================
- // STAGE 2D.3B.7C.6B - IFC HIERARCHY RETRIEVAL
- // READ-ONLY DIAGNOSTICS
- // ============================================================
-
- let hierarchyTestBusy = false;
-
- async function inspectIfcHierarchy() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (hierarchyTestBusy) {
-     throw new Error('Hierarchy inspection is already running.');
-   }
-
-   const modelId = el('model').value;
-   const guid = el('guid').value.trim().toLowerCase();
-
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
-
-   if (!validGuid(guid)) {
-     throw new Error('Enter a valid Tekla assembly GUID.');
-   }
-
-   hierarchyTestBusy = true;
-
-   try {
-
-     status('Resolving selected IFC assembly...');
-
-     const runtimeIds =
-       await api.viewer.convertToObjectRuntimeIds(
-         modelId,
-         [guid]
-       );
-
-     const runtimeId = runtimeIds && runtimeIds[0];
-
-     if (!Number.isInteger(runtimeId)) {
-       throw new Error('Assembly GUID could not be resolved.');
-     }
-
-     // Capture each independent API result, including errors,
-     // without stopping the other read-only tests.
-
-     async function probe(name, callback) {
-
-       try {
-
-         const result = await callback();
-
-         return {
-           method: name,
-           success: true,
-           count: Array.isArray(result)
-             ? result.length
-             : null,
-           sample: Array.isArray(result)
-             ? result.slice(0, 5)
-             : result
-         };
-
-       } catch (error) {
-
-         return {
-           method: name,
-           success: false,
-           error: error.message
-         };
-       }
-     }
-
-     status('Reading assembly children and parents...');
-
-     const directChildren = await probe(
-       'getHierarchyChildren - direct',
-       () => api.viewer.getHierarchyChildren(
-         modelId,
-         [runtimeId]
-       )
-     );
-
-     const recursiveChildren = await probe(
-       'getHierarchyChildren - recursive',
-       () => api.viewer.getHierarchyChildren(
-         modelId,
-         [runtimeId],
-         undefined,
-         true
-       )
-     );
-
-     const directParents = await probe(
-       'getHierarchyParents - direct',
-       () => api.viewer.getHierarchyParents(
-         modelId,
-         [runtimeId]
-       )
-     );
-
-     status('Reading IFC object information...');
-
-     const selectedSelector = {
-       modelObjectIds: [{
-         modelId,
-         objectRuntimeIds: [runtimeId],
-         recursive: true
-       }]
-     };
-
-     const selectedObjects = await probe(
-       'getObjects - selected assembly',
-       () => api.viewer.getObjects(selectedSelector)
-     );
-
-     // getObjects without a selector is documented as valid.
-     // Its results are sampled rather than fully printed.
-
-     const allObjects = await probe(
-       'getObjects - all viewer objects',
-       () => api.viewer.getObjects()
-     );
-
-     const report = {
-       stage: '2D.3B.7C.6B',
-       mode: 'Read-only',
-       modelId,
-       guid,
-       selectedRuntimeId: runtimeId,
-       tests: {
-         directChildren,
-         recursiveChildren,
-         directParents,
-         selectedObjects,
-         allObjects
-       },
-       viewerAppearanceModified: false,
-       notes: [
-         'Only read-only API methods were called.',
-         'Samples are limited to five entries per result.',
-         'Object counts and identifier formats require review.',
-         'All-viewer results may include other loaded models.'
-       ]
-     };
-
-     log(
-       'STAGE 2D.3B.7C.6B - IFC HIERARCHY REPORT',
-       report
-     );
-
-     status(
-       'Hierarchy inspection completed. ' +
-       'Copy the diagnostic report for review.'
-     );
-
-     return report;
-
-   } finally {
-     hierarchyTestBusy = false;
-   }
- }
-
-
- // ============================================================
- // STAGE 2D.3B.7C.6C
- // CONTROLLED AUTOMATIC SURROUNDING TRANSPARENCY
- // ============================================================
-
- let autoTransparencyBusy = false;
- let autoTransparencyActive = false;
- let autoTransparencySelector = null;
- let autoTransparencyDetails = null;
-
- const AUTO_TRANSPARENCY_BATCH_SIZE = 10;
-
- async function testAutomaticTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (autoTransparencyBusy) {
-     throw new Error('Automatic transparency test is running.');
-   }
-
-   if (autoTransparencyActive) {
-     throw new Error('Restore the previous automatic test first.');
-   }
-
-   if (
-     transparencyTestActive ||
-     ghostStyleTestActive ||
-     doesNotEqualTestActive
-   ) {
-     throw new Error(
-       'Restore all earlier transparency tests before continuing.'
-     );
-   }
-
-   const modelId = el('model').value;
-   const guid = el('guid').value.trim().toLowerCase();
-
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
-
-   if (!validGuid(guid)) {
-     throw new Error('Enter a valid Tekla assembly GUID.');
-   }
-
-   autoTransparencyBusy = true;
-
-   try {
-
-     status('Resolving selected assembly...');
-
-     const runtimeIds =
-       await api.viewer.convertToObjectRuntimeIds(
-         modelId,
-         [guid]
-       );
-
-     const selectedRuntimeId = runtimeIds && runtimeIds[0];
-
-     if (!Number.isInteger(selectedRuntimeId)) {
-       throw new Error('Assembly GUID could not be resolved.');
-     }
-
-     const selectedSelector = {
-       modelObjectIds: [{
-         modelId,
-         objectRuntimeIds: [selectedRuntimeId],
-         recursive: true
-       }]
-     };
-
-     status('Retrieving IFC object hierarchy...');
-
-     const allGroups = await api.viewer.getObjects();
-
-     const protectedGroups =
-       await api.viewer.getObjects(selectedSelector);
-
-     const allGroup = allGroups.find(
-       group => group.modelId === modelId
-     );
-
-     const protectedGroup = protectedGroups.find(
-       group => group.modelId === modelId
-     );
-
-     if (!allGroup || !Array.isArray(allGroup.objects)) {
-       throw new Error('Could not retrieve IFC model objects.');
-     }
-
-     if (
-       !protectedGroup ||
-       !Array.isArray(protectedGroup.objects)
-     ) {
-       throw new Error('Could not retrieve selected assembly objects.');
-     }
-
-     const allIds = allGroup.objects
-       .map(object => object.id)
-       .filter(Number.isInteger);
-
-     const protectedIds = new Set(
-       protectedGroup.objects
-         .map(object => object.id)
-         .filter(Number.isInteger)
-     );
-
-     protectedIds.add(selectedRuntimeId);
-
-     // Also exclude the selected assembly's hierarchy ancestors.
-     // This avoids applying an appearance override directly
-     // to a parent container of the selected assembly.
-
-     const parents = await api.viewer.getHierarchyParents(
-       modelId,
-       [selectedRuntimeId]
-     );
-
-     const ancestorIds = [];
-
-     for (const parent of parents || []) {
-       if (Number.isInteger(parent.id)) {
-         protectedIds.add(parent.id);
-         ancestorIds.push(parent.id);
-       }
-     }
-
-     const surroundingIds = Array.from(new Set(allIds))
-       .filter(id => !protectedIds.has(id));
-
-     // Restrict this first test to a small batch.
-     // Do not recursively affect hierarchy descendants.
-
-     const batchIds = surroundingIds.slice(
-       0,
-       AUTO_TRANSPARENCY_BATCH_SIZE
-     );
-
-     if (batchIds.length === 0) {
-       throw new Error('No surrounding objects were found.');
-     }
-
-     const surroundingSelector = {
-       modelObjectIds: [{
-         modelId,
-         objectRuntimeIds: batchIds,
-         recursive: false
-       }]
-     };
-
-     const details = {
-       stage: '2D.3B.7C.6C',
-       modelId,
-       selectedGuid: guid,
-       selectedRuntimeId,
-       totalObjectIds: allIds.length,
-       protectedObjectIds: Array.from(protectedIds).sort(
-         (a, b) => a - b
-       ),
-       ancestorIds,
-       surroundingObjectCount: surroundingIds.length,
-       batchIds,
-       requestedOpacity: 0.2,
-       recursive: false
-     };
-
-     log('AUTOMATIC TRANSPARENCY - PREPARATION', details);
-
-     // Save the selector before changing appearance so
-     // the Restore button remains available after an error.
-
-     autoTransparencySelector = surroundingSelector;
-     autoTransparencyDetails = details;
-     autoTransparencyActive = true;
-
-     status(
-       'Applying transparency to ' +
-       batchIds.length +
-       ' surrounding object IDs...'
-     );
-
-     await api.viewer.setObjectState(
-       surroundingSelector,
-       {
-         opacity: 0.2
-       }
-     );
-
-     // Do not modify the selected assembly's appearance.
-     // Do not isolate objects or change the camera.
-
-     log('AUTOMATIC TRANSPARENCY - APPLIED', {
-       ...details,
-       selectedAssemblyAppearanceModified: false,
-       restoreAvailable: true
-     });
-
-     status(
-       'Automatic transparency batch applied. ' +
-       'Inspect the model and use Restore Automatic Transparency.'
-     );
-
-   } finally {
-     autoTransparencyBusy = false;
-   }
- }
-
- async function restoreAutomaticTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (autoTransparencyBusy) {
-     throw new Error('Automatic transparency operation is running.');
-   }
-
-   if (!autoTransparencyActive || !autoTransparencySelector) {
-     status('No active automatic transparency test to restore.');
-     return;
-   }
-
-   autoTransparencyBusy = true;
-
-   try {
-
-     status('Restoring automatic transparency batch...');
-
-     await api.viewer.setObjectState(
-       autoTransparencySelector,
-       {
-         opacity: 1
-       }
-     );
-
-     log('AUTOMATIC TRANSPARENCY - RESTORED', {
-       stage: '2D.3B.7C.6C',
-       modelId: autoTransparencyDetails.modelId,
-       restoredIds: autoTransparencyDetails.batchIds,
-       requestedOpacity: 1,
-       completed: true
-     });
-
-     autoTransparencyActive = false;
-     autoTransparencySelector = null;
-     autoTransparencyDetails = null;
-
-     status(
-       'Automatic transparency batch restored. ' +
-       'Check that original appearance has returned.'
-     );
-
-   } finally {
-     autoTransparencyBusy = false;
-   }
- }
-
-
- // ============================================================
- // STAGE 2D.3B.7C.6D
- // FULL-MODEL AUTOMATIC TRANSPARENCY
- // ============================================================
-
- let fullTransparencyBusy = false;
- let fullTransparencyActive = false;
- let fullTransparencyModelId = null;
- let fullTransparencyBatches = [];
- let fullTransparencyDetails = null;
-
- const FULL_TRANSPARENCY_BATCH_SIZE = 50;
- const FULL_TRANSPARENCY_OPACITY = 0.2;
-
- function fullTransparencySelector(modelId, ids) {
-   return {
-     modelObjectIds: [{
-       modelId,
-       objectRuntimeIds: ids,
-       recursive: false
-     }]
-   };
- }
-
- function fullTransparencyIds(groups, modelId) {
-   const group = Array.isArray(groups)
-     ? groups.find(item => item.modelId === modelId)
-     : null;
-
-   if (!group || !Array.isArray(group.objects)) {
-     throw new Error(
-       'Could not retrieve object IDs for model: ' + modelId
-     );
-   }
-
-   if (group.objects.some(
-     object => !Number.isInteger(object.id)
-   )) {
-     throw new Error(
-       'The viewer returned an unexpected object ID format.'
-     );
-   }
-
-   return [...new Set(
-     group.objects.map(object => object.id)
-   )];
- }
-
- function fullTransparencyParentIds(parents) {
-   if (!Array.isArray(parents)) {
-     throw new Error(
-       'Unexpected hierarchy parent response.'
-     );
-   }
-
-   // Accept flat hierarchy entries with integer IDs.
-   // If the viewer returns a nested format, stop safely.
-   if (parents.some(parent =>
-     !parent || !Number.isInteger(parent.id)
-   )) {
-     throw new Error(
-       'Unexpected parent ID format. Review hierarchy diagnostics.'
-     );
-   }
-
-   return parents.map(parent => parent.id);
- }
-
- async function testFullModelTransparency() {
-
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
-
-   if (fullTransparencyBusy) {
-     throw new Error('A full-model operation is already running.');
-   }
-
-   if (fullTransparencyActive) {
-     throw new Error('Restore the previous full-model test first.');
-   }
-
-   if (
-     autoTransparencyActive ||
-     autoTransparencyBusy ||
-     transparencyTestActive ||
-     transparencyTestBusy ||
-     ghostStyleTestActive ||
-     ghostStyleTestBusy ||
-     doesNotEqualTestActive ||
-     doesNotEqualTestBusy ||
-     appearanceTestBusy
-   ) {
-     throw new Error(
-       'Finish or restore all other appearance tests first.'
-     );
-   }
-
-   const modelId = el('model').value;
-   const guid = el('guid').value.trim().toLowerCase();
-
-   if (!modelId) {
-     throw new Error('Select a loaded IFC model.');
-   }
-
-   if (!validGuid(guid)) {
-     throw new Error('Enter a valid Tekla assembly GUID.');
-   }
-
-   fullTransparencyBusy = true;
-
-   try {
-
-     status('Resolving the selected assembly...');
-
-     const runtimeIds =
-       await api.viewer.convertToObjectRuntimeIds(
-         modelId,
-         [guid]
-       );
-
-     const selectedRuntimeId = runtimeIds && runtimeIds[0];
-
-     if (!Number.isInteger(selectedRuntimeId)) {
-       throw new Error('Assembly GUID could not be resolved.');
-     }
-
-     const selectedSelector = {
-       modelObjectIds: [{
-         modelId,
-         objectRuntimeIds: [selectedRuntimeId],
-         recursive: true
-       }]
-     };
-
-     status('Retrieving all IFC objects...');
-
-     const allGroups = await api.viewer.getObjects();
-     const selectedGroups =
-       await api.viewer.getObjects(selectedSelector);
-
-     const allIds = fullTransparencyIds(
-       allGroups,
-       modelId
-     );
-
-     const selectedIds = fullTransparencyIds(
-       selectedGroups,
-       modelId
-     );
-
-     if (!selectedIds.includes(selectedRuntimeId)) {
-       throw new Error(
-         'Selected assembly ID missing from protected objects.'
-       );
-     }
-
-     // Protect the assembly and every descendant returned
-     // by the recursive object query.
-
-     const protectedIds = new Set(selectedIds);
-     protectedIds.add(selectedRuntimeId);
-
-     // Also protect hierarchy parents. These may be
-     // containers shared with the selected assembly.
-
-     const parents =
-       await api.viewer.getHierarchyParents(
-         modelId,
-         [selectedRuntimeId]
-       );
-
-     const parentIds = fullTransparencyParentIds(parents);
-
-     for (const id of parentIds) {
-       protectedIds.add(id);
-     }
-
-     const surroundingIds = allIds.filter(
-       id => !protectedIds.has(id)
-     );
-
-     if (surroundingIds.length === 0) {
-       throw new Error(
-         'No surrounding IFC objects were found.'
-       );
-     }
-
-     // Verify no protected IDs appear in the result.
-
-     if (surroundingIds.some(
-       id => protectedIds.has(id)
-     )) {
-       throw new Error(
-         'Protected assembly IDs were included unexpectedly.'
-       );
-     }
-
-     const batches = [];
-
-     for (
-       let i = 0;
-       i < surroundingIds.length;
-       i += FULL_TRANSPARENCY_BATCH_SIZE
-     ) {
-       batches.push(
-         surroundingIds.slice(
-           i,
-           i + FULL_TRANSPARENCY_BATCH_SIZE
-         )
-       );
-     }
-
-     fullTransparencyModelId = modelId;
-     fullTransparencyBatches = [];
-     fullTransparencyActive = true;
-
-     fullTransparencyDetails = {
-       stage: '2D.3B.7C.6D',
-       modelId,
-       selectedGuid: guid,
-       selectedRuntimeId,
-       totalObjectCount: allIds.length,
-       protectedObjectCount: protectedIds.size,
-       protectedIds: [...protectedIds].sort(
-         (a, b) => a - b
-       ),
-       surroundingObjectCount: surroundingIds.length,
-       batchSize: FULL_TRANSPARENCY_BATCH_SIZE,
-       totalBatches: batches.length,
-       requestedOpacity: FULL_TRANSPARENCY_OPACITY,
-       recursive: false
-     };
-
-     log(
-       'FULL-MODEL TRANSPARENCY - PREPARATION',
-       fullTransparencyDetails
-     );
-
-     // Each batch is recorded BEFORE the API call.
-     // This ensures Restore can retry even if the
-     // API partially applies a batch before failing.
-
-     let processed = 0;
-
-     for (let i = 0; i < batches.length; i++) {
-
-       const batchIds = batches[i];
-
-       fullTransparencyBatches.push(batchIds);
-
-       status(
-         'Applying full-model transparency: ' +
-         (i + 1) + '/' + batches.length +
-         ' batches (' + processed + '/' +
-         surroundingIds.length + ' IDs processed)...'
-       );
-
-       await api.viewer.setObjectState(
-         fullTransparencySelector(modelId, batchIds),
-         { opacity: FULL_TRANSPARENCY_OPACITY }
-       );
-
-       processed += batchIds.length;
-
-       log('FULL-MODEL TRANSPARENCY - BATCH', {
-         batch: i + 1,
-         totalBatches: batches.length,
-         processed,
-         total: surroundingIds.length,
-         batchIds
-       });
-
-     }
-
 // ============================================================
-// STAGE 2D.3B.7C.6E
-// KEEP SELECTED ASSEMBLY FULLY OPAQUE
+// STAGE 2D.3B.7C.6D
+// FULL-MODEL AUTOMATIC TRANSPARENCY
 // ============================================================
 
-// The full-model transparency operation may also affect
-// the selected assembly through IFC hierarchy relationships.
-//
-// Reapply full opacity to the selected assembly and all
-// its descendants after processing surrounding objects.
+let fullTransparencyBusy = false;
+let fullTransparencyActive = false;
+let fullTransparencyModelId = null;
+let fullTransparencyBatches = [];
+let fullTransparencyDetails = null;
 
-status('Restoring selected assembly to full opacity...');
+const FULL_TRANSPARENCY_BATCH_SIZE = 50;
+const FULL_TRANSPARENCY_OPACITY = 0.2;
 
-await api.viewer.setObjectState(
-  selectedSelector,
-  {
-    opacity: 1
+function fullTransparencySelector(modelId, ids) {
+
+  return {
+    modelObjectIds: [{
+      modelId,
+      objectRuntimeIds: ids,
+      recursive: false
+    }]
+  };
+}
+
+function fullTransparencyIds(groups, modelId) {
+
+  const group = Array.isArray(groups)
+    ? groups.find(item => item.modelId === modelId)
+    : null;
+
+  if (!group || !Array.isArray(group.objects)) {
+    throw new Error(
+      'Could not retrieve object IDs for model: ' + modelId
+    );
   }
-);
 
-// Do not modify the assembly's colour.
-// Its original IFC material colours must remain unchanged.
+  if (group.objects.some(
+    object => !Number.isInteger(object.id)
+  )) {
+    throw new Error(
+      'The viewer returned an unexpected object ID format.'
+    );
+  }
 
-log('FULL-MODEL TRANSPARENCY - COMPLETE', {
-  ...fullTransparencyDetails,
-  processed,
-  selectedOpacityRequested: 1,
-  selectedColourModified: false,
-  restoreAvailable: true
-});
+  return [...new Set(
+    group.objects.map(object => object.id)
+  )];
+}
 
-     status(
-       'Full-model transparency applied to ' +
-       processed +
-       ' surrounding object IDs. Inspect the model, ' +
-       'then use Restore Full-Model Transparency.'
-     );
+function fullTransparencyParentIds(parents) {
 
-   } catch (error) {
+  if (!Array.isArray(parents)) {
+    throw new Error(
+      'Unexpected hierarchy parent response.'
+    );
+  }
 
-     if (fullTransparencyActive) {
-       log('FULL-MODEL TRANSPARENCY - INTERRUPTED', {
-         error: error.message,
-         batchesToRestore: fullTransparencyBatches.length,
-         restoreAvailable: true
-       });
+  if (parents.some(parent =>
+    !parent || !Number.isInteger(parent.id)
+  )) {
+    throw new Error(
+      'Unexpected parent ID format. Review hierarchy diagnostics.'
+    );
+  }
 
-       status(
-         'Full-model test interrupted. Use Restore ' +
-         'Full-Model Transparency before trying again.'
-       );
-     }
+  return parents.map(parent => parent.id);
+}
 
-     throw error;
+async function testFullModelTransparency() {
 
-   } finally {
-     fullTransparencyBusy = false;
-   }
- }
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
 
- async function restoreFullModelTransparency() {
+  if (fullTransparencyBusy) {
+    throw new Error('A full-model operation is already running.');
+  }
 
-   if (!api) {
-     throw new Error('Connect to Trimble Connect first.');
-   }
+  if (fullTransparencyActive) {
+    throw new Error(
+      'Restore the previous full-model transparency first.'
+    );
+  }
 
-   if (fullTransparencyBusy) {
-     throw new Error('A full-model operation is running.');
-   }
+  if (
+    autoTransparencyActive ||
+    autoTransparencyBusy ||
+    transparencyTestActive ||
+    transparencyTestBusy ||
+    ghostStyleTestActive ||
+    ghostStyleTestBusy ||
+    doesNotEqualTestActive ||
+    doesNotEqualTestBusy ||
+    appearanceTestBusy
+  ) {
+    throw new Error(
+      'Finish or restore all other appearance tests first.'
+    );
+  }
 
-   if (!fullTransparencyActive) {
-     status('No active full-model transparency test.');
-     return;
-   }
+  const modelId = el('model').value;
+  const guid = el('guid').value.trim().toLowerCase();
 
-   fullTransparencyBusy = true;
+  if (!modelId) {
+    throw new Error('Select a loaded IFC model.');
+  }
 
-   try {
+  if (!validGuid(guid)) {
+    throw new Error('Enter a valid Tekla assembly GUID.');
+  }
 
-     const modelId = fullTransparencyModelId;
-     const batches = fullTransparencyBatches;
+  fullTransparencyBusy = true;
 
-     let restored = 0;
+  try {
 
-     // Restore in reverse order. If restoration fails,
-     // retain the tracking information for another attempt.
+    // --------------------------------------------------------
+    // STEP 1 - RESOLVE ASSEMBLY
+    // --------------------------------------------------------
 
-     for (let i = batches.length - 1; i >= 0; i--) {
+    status('Resolving the selected assembly...');
 
-       const ids = batches[i];
+    const runtimeIds =
+      await api.viewer.convertToObjectRuntimeIds(
+        modelId,
+        [guid]
+      );
 
-       status(
-         'Restoring full-model appearance: ' +
-         (batches.length - i) + '/' +
-         batches.length + ' batches...'
-       );
+    const selectedRuntimeId = runtimeIds && runtimeIds[0];
 
-       await api.viewer.setObjectState(
-         fullTransparencySelector(modelId, ids),
-         { opacity: 1 }
-       );
+    if (!Number.isInteger(selectedRuntimeId)) {
+      throw new Error(
+        'Assembly GUID could not be resolved.'
+      );
+    }
 
-       restored += ids.length;
+    const selectedSelector = {
+      modelObjectIds: [{
+        modelId,
+        objectRuntimeIds: [selectedRuntimeId],
+        recursive: true
+      }]
+    };
 
-       // Remove only successfully restored batches.
-       batches.splice(i, 1);
-     }
+    // --------------------------------------------------------
+    // STEP 2 - RETRIEVE IFC OBJECTS
+    // --------------------------------------------------------
 
-     log('FULL-MODEL TRANSPARENCY - RESTORED', {
-       stage: '2D.3B.7C.6D',
-       modelId,
-       restoredObjectCount: restored,
-       completed: true
-     });
+    status('Retrieving all IFC objects...');
 
-     fullTransparencyActive = false;
-     fullTransparencyModelId = null;
-     fullTransparencyBatches = [];
-     fullTransparencyDetails = null;
+    const allGroups = await api.viewer.getObjects();
 
-     status(
-       'Full-model transparency restored. ' +
-       'Check that all surrounding objects are solid again.'
-     );// INITIALISE AUTOMATIC NAVIGATION
+    const selectedGroups =
+      await api.viewer.getObjects(selectedSelector);
 
-   } catch (error) {
+    const allIds = fullTransparencyIds(
+      allGroups,
+      modelId
+    );
 
-     log('FULL-MODEL RESTORE - INTERRUPTED', {
-       error: error.message,
-       remainingBatches: fullTransparencyBatches.length
-     });
+    const selectedIds = fullTransparencyIds(
+      selectedGroups,
+      modelId
+    );
 
-     throw error;
+    if (!selectedIds.includes(selectedRuntimeId)) {
+      throw new Error(
+        'Selected assembly ID missing from protected objects.'
+      );
+    }
 
-   } finally {
-     fullTransparencyBusy = false;
-   }
- }
+    // --------------------------------------------------------
+    // STEP 3 - PROTECT SELECTED ASSEMBLY
+    // --------------------------------------------------------
 
+    const protectedIds = new Set(selectedIds);
 
+    protectedIds.add(selectedRuntimeId);
+
+    // Protect the direct hierarchy parents.
+    const parents =
+      await api.viewer.getHierarchyParents(
+        modelId,
+        [selectedRuntimeId]
+      );
+
+    const parentIds = fullTransparencyParentIds(parents);
+
+    for (const id of parentIds) {
+      protectedIds.add(id);
+    }
+
+    // --------------------------------------------------------
+    // STEP 4 - IDENTIFY SURROUNDING OBJECTS
+    // --------------------------------------------------------
+
+    const surroundingIds = allIds.filter(
+      id => !protectedIds.has(id)
+    );
+
+    if (surroundingIds.length === 0) {
+      throw new Error(
+        'No surrounding IFC objects were found.'
+      );
+    }
+
+    if (surroundingIds.some(
+      id => protectedIds.has(id)
+    )) {
+      throw new Error(
+        'Protected assembly IDs were included unexpectedly.'
+      );
+    }
+
+    // --------------------------------------------------------
+    // STEP 5 - CREATE BATCHES
+    // --------------------------------------------------------
+
+    const batches = [];
+
+    for (
+      let i = 0;
+      i < surroundingIds.length;
+      i += FULL_TRANSPARENCY_BATCH_SIZE
+    ) {
+
+      batches.push(
+        surroundingIds.slice(
+          i,
+          i + FULL_TRANSPARENCY_BATCH_SIZE
+        )
+      );
+    }
+
+    // Record restoration information before modifying
+    // the appearance of any surrounding objects.
+
+    fullTransparencyModelId = modelId;
+    fullTransparencyBatches = [];
+    fullTransparencyActive = true;
+
+    fullTransparencyDetails = {
+      stage: '2D.3B.7C.7',
+      modelId,
+      selectedGuid: guid,
+      selectedRuntimeId,
+      totalObjectCount: allIds.length,
+      protectedObjectCount: protectedIds.size,
+      protectedIds: [...protectedIds].sort(
+        (a, b) => a - b
+      ),
+      surroundingObjectCount: surroundingIds.length,
+      batchSize: FULL_TRANSPARENCY_BATCH_SIZE,
+      totalBatches: batches.length,
+      requestedOpacity: FULL_TRANSPARENCY_OPACITY,
+      recursive: false
+    };
+
+    log(
+      'FULL-MODEL TRANSPARENCY - PREPARATION',
+      fullTransparencyDetails
+    );
+
+    // --------------------------------------------------------
+    // STEP 6 - APPLY SURROUNDING TRANSPARENCY
+    // --------------------------------------------------------
+
+    let processed = 0;
+
+    for (let i = 0; i < batches.length; i++) {
+
+      const batchIds = batches[i];
+
+      // Track each batch before applying appearance changes.
+      // This allows restoration after a partial failure.
+
+      fullTransparencyBatches.push(batchIds);
+
+      status(
+        'Applying full-model transparency: ' +
+        (i + 1) + '/' + batches.length +
+        ' batches (' + processed + '/' +
+        surroundingIds.length + ' IDs processed)...'
+      );
+
+      await api.viewer.setObjectState(
+        fullTransparencySelector(modelId, batchIds),
+        {
+          opacity: FULL_TRANSPARENCY_OPACITY
+        }
+      );
+
+      processed += batchIds.length;
+
+      log('FULL-MODEL TRANSPARENCY - BATCH', {
+        batch: i + 1,
+        totalBatches: batches.length,
+        processed,
+        total: surroundingIds.length,
+        batchIds
+      });
+    }
+
+    // ========================================================
+    // STAGE 2D.3B.7C.6E
+    // KEEP SELECTED ASSEMBLY FULLY OPAQUE
+    // ========================================================
+
+    // This is the successful correction from Stage 6E.
+    // It must run AFTER all surrounding transparency batches.
+
+    status('Restoring selected assembly to full opacity...');
+
+    await api.viewer.setObjectState(
+      selectedSelector,
+      {
+        opacity: 1
+      }
+    );
+
+    // Do not modify the selected assembly's colour.
+    // Its original IFC material colours must remain unchanged.
+
+    log('FULL-MODEL TRANSPARENCY - COMPLETE', {
+      ...fullTransparencyDetails,
+      processed,
+      selectedOpacityRequested: 1,
+      selectedColourModified: false,
+      restoreAvailable: true
+    });
+
+    status(
+      'Full-model transparency applied to ' +
+      processed +
+      ' surrounding object IDs. Selected assembly is solid.'
+    );
+
+  } catch (error) {
+
+    if (fullTransparencyActive) {
+
+      log('FULL-MODEL TRANSPARENCY - INTERRUPTED', {
+        error: error.message,
+        batchesToRestore: fullTransparencyBatches.length,
+        restoreAvailable: true
+      });
+
+      status(
+        'Full-model transparency interrupted. ' +
+        'Use Restore Model Appearance before trying again.'
+      );
+    }
+
+    throw error;
+
+  } finally {
+
+    fullTransparencyBusy = false;
+  }
+}
+
+// ============================================================
+// RESTORE FULL-MODEL TRANSPARENCY
+// ============================================================
+
+async function restoreFullModelTransparency() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (fullTransparencyBusy) {
+    throw new Error('A full-model operation is running.');
+  }
+
+  if (!fullTransparencyActive) {
+    status('No active full-model transparency to restore.');
+    return;
+  }
+
+  fullTransparencyBusy = true;
+
+  try {
+
+    const modelId = fullTransparencyModelId;
+    const batches = fullTransparencyBatches;
+
+    let restored = 0;
+
+    // Restore in reverse order.
+    // Keep any unsuccessful batches for a later retry.
+
+    for (let i = batches.length - 1; i >= 0; i--) {
+
+      const ids = batches[i];
+
+      status(
+        'Restoring full-model appearance: ' +
+        (batches.length - i) + '/' +
+        batches.length + ' batches...'
+      );
+
+      await api.viewer.setObjectState(
+        fullTransparencySelector(modelId, ids),
+        {
+          opacity: 1
+        }
+      );
+
+      restored += ids.length;
+
+      batches.splice(i, 1);
+    }
+
+    log('FULL-MODEL TRANSPARENCY - RESTORED', {
+      stage: '2D.3B.7C.7',
+      modelId,
+      restoredObjectCount: restored,
+      completed: true
+    });
+
+    fullTransparencyActive = false;
+    fullTransparencyModelId = null;
+    fullTransparencyBatches = [];
+    fullTransparencyDetails = null;
+
+    status(
+      'Full-model transparency restored. ' +
+      'All surrounding objects should now be solid.'
+    );
+
+  } catch (error) {
+
+    log('FULL-MODEL RESTORE - INTERRUPTED', {
+      error: error.message,
+      remainingBatches: fullTransparencyBatches.length
+    });
+
+    throw error;
+
+  } finally {
+
+    fullTransparencyBusy = false;
+  }
+}
 
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
@@ -2288,17 +2264,24 @@ async function readSelected() {
 }
 
 // ============================================================
-// FIND, ISOLATE, SELECT AND ZOOM
+// STAGE 2D.3B.7C.7
+// FIND ASSEMBLY WITH AUTOMATIC TRANSPARENCY
 // ============================================================
 
 async function findAssembly() {
 
   if (!api) {
-    throw new Error('Connect first.');
+    throw new Error('Connect to Trimble Connect first.');
+  }
+
+  if (assemblyNavigationBusy || fullTransparencyBusy) {
+    throw new Error('Assembly navigation is already running.');
   }
 
   const guid =
     el('guid').value.trim().toLowerCase();
+
+  const modelId = el('model').value;
 
   if (!validGuid(guid)) {
     throw new Error(
@@ -2306,176 +2289,194 @@ async function findAssembly() {
     );
   }
 
-  const modelId = el('model').value;
-
   if (!modelId) {
     throw new Error(
       'Choose a model. Open the IFC in the 3D viewer first.'
     );
   }
 
-  // ==========================================================
-  // RESOLVE GUID
-  // ==========================================================
+  assemblyNavigationBusy = true;
 
-  status('Resolving IFC object GUID...');
+  try {
 
-  const runtimeIds =
-    await api.viewer.convertToObjectRuntimeIds(
+    // --------------------------------------------------------
+    // STEP 1 - RESOLVE TARGET BEFORE CHANGING APPEARANCE
+    // --------------------------------------------------------
+
+    status('Resolving Tekla assembly GUID...');
+
+    const runtimeIds =
+      await api.viewer.convertToObjectRuntimeIds(
+        modelId,
+        [guid]
+      );
+
+    log('GUID -> runtime ID result', {
       modelId,
-      [guid]
-    );
+      guid,
+      runtimeIds
+    });
 
-  log('GUID -> runtime ID result', {
-    modelId,
-    guid,
-    runtimeIds
-  });
+    const runtimeId = runtimeIds && runtimeIds[0];
 
-  const id = runtimeIds && runtimeIds[0];
+    if (!Number.isInteger(runtimeId)) {
+      throw new Error(
+        'Assembly GUID not resolved in this model.'
+      );
+    }
 
-  if (!Number.isInteger(id)) {
-    throw new Error(
-      'Assembly GUID not resolved in this model.'
-    );
-  }
-
-  const selector = {
-    modelObjectIds: [
-      {
+    const selector = {
+      modelObjectIds: [{
         modelId,
-        objectRuntimeIds: [id],
+        objectRuntimeIds: [runtimeId],
         recursive: true
+      }]
+    };
+
+    // --------------------------------------------------------
+    // STEP 2 - CHECK FOR OTHER ACTIVE APPEARANCE TESTS
+    // --------------------------------------------------------
+
+    if (
+      autoTransparencyActive ||
+      autoTransparencyBusy ||
+      transparencyTestActive ||
+      transparencyTestBusy ||
+      ghostStyleTestActive ||
+      ghostStyleTestBusy ||
+      doesNotEqualTestActive ||
+      doesNotEqualTestBusy ||
+      appearanceTestBusy
+    ) {
+      throw new Error(
+        'Restore any earlier appearance tests before navigating.'
+      );
+    }
+
+    // --------------------------------------------------------
+    // STEP 3 - RESTORE PREVIOUS NAVIGATION
+    // --------------------------------------------------------
+
+    if (fullTransparencyActive) {
+
+      status('Restoring previous assembly appearance...');
+
+      await restoreFullModelTransparency();
+
+      if (fullTransparencyActive) {
+        throw new Error(
+          'Previous transparency could not be fully restored.'
+        );
       }
-    ]
-  };
+    }
 
-  lastAssemblySelector = selector;
+    // --------------------------------------------------------
+    // STEP 4 - APPLY AUTOMATIC TRANSPARENCY
+    // --------------------------------------------------------
 
-  // ==========================================================
-  // STEP 1 - CHECK GHOST MODE BEFORE ISOLATION
-  // ==========================================================
+    status('Applying automatic surrounding transparency...');
 
-  const ghostBeforeIsolation =
-    await tryInspectNativeGhostMode(
-      'Before isolation'
+    // Reuse the successful Stage 6D/6E functionality.
+    // The function reads the current GUID and model fields,
+    // applies 20% opacity to surrounding objects, and
+    // restores the selected assembly to 100% opacity.
+
+    await testFullModelTransparency();
+
+    // --------------------------------------------------------
+    // STEP 5 - SELECT AND ZOOM
+    // --------------------------------------------------------
+
+    status('Selecting assembly...');
+
+    await api.viewer.setSelection(
+      selector,
+      'set'
     );
 
-  if (ghostBeforeIsolation === true) {
+    status('Zooming to assembly...');
+
+    await api.viewer.setCamera(selector);
+
+    lastAssemblySelector = selector;
+
+    // --------------------------------------------------------
+    // STEP 6 - REPORT SUCCESS
+    // --------------------------------------------------------
+
+    log('ASSEMBLY NAVIGATION - COMPLETE', {
+      stage: '2D.3B.7C.7',
+      modelId,
+      guid,
+      runtimeId,
+      surroundingOpacity: FULL_TRANSPARENCY_OPACITY,
+      selectedOpacity: 1,
+      originalIfcColoursPreserved: true,
+      nativeGhostModeRequired: false,
+      restoreAvailable: true
+    });
 
     status(
-      'Turn OFF native Ghost Mode in the ' +
-      'Trimble Connect toolbar, then run ' +
-      'Isolate, Select & Zoom again.'
+      'Assembly located successfully. Selected assembly is ' +
+      'solid and surrounding IFC objects are transparent.'
     );
 
-    log(
-      'Navigation paused: Native Ghost Mode must be OFF'
-    );
+    return true;
 
-    return false;
+  } catch (error) {
+
+    log('ASSEMBLY NAVIGATION - ERROR', {
+      stage: '2D.3B.7C.7',
+      error: error.message,
+      transparencyRestoreAvailable: fullTransparencyActive
+    });
+
+    throw error;
+
+  } finally {
+
+    assemblyNavigationBusy = false;
+  }
+}
+
+// ============================================================
+// STAGE 2D.3B.7C.7
+// RESTORE MODEL APPEARANCE
+// ============================================================
+
+async function restoreNavigationAppearance() {
+
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
   }
 
-  // ==========================================================
-  // STEP 2 - SHOW ONLY SELECTED OBJECTS
-  // ==========================================================
-
-  status('Showing only the selected assembly...');
-
-  const isolated =
-    await api.viewer.isolateEntities([
-      {
-        modelId,
-        entityIds: [id]
-      }
-    ]);
-
-  log('Show Only Selected Objects', {
-    modelId,
-    runtimeId: id,
-    result: isolated
-  });
-
-  if (isolated !== true) {
+  if (assemblyNavigationBusy || fullTransparencyBusy) {
     throw new Error(
-      'Trimble Connect could not isolate the assembly.'
+      'Wait for the current navigation operation to finish.'
     );
   }
 
-  // ==========================================================
-  // STEP 3 - REQUEST NATIVE GHOST MODE
-  // ==========================================================
-
-  const ghostAfterIsolation =
-    await tryInspectNativeGhostMode(
-      'Immediately after isolation'
-    );
-
-  if (ghostAfterIsolation !== true) {
-
-    status(
-      'Assembly isolated successfully. ' +
-      'Enable native Ghost Mode in the ' +
-      'Trimble Connect toolbar.'
-    );
-
-    log(
-      'Assembly isolated. Native Ghost Mode is OFF.'
-    );
+  if (!fullTransparencyActive) {
+    status('No active navigation transparency to restore.');
+    return;
   }
 
-  // ==========================================================
-  // STEP 4 - HIGHLIGHT ASSEMBLY
-  // ==========================================================
+  await restoreFullModelTransparency();
 
-  status('Highlighting the assembly...');
+  if (!fullTransparencyActive) {
 
-  await api.viewer.setSelection(
-    selector,
-    'set'
-  );
+    lastAssemblySelector = null;
 
-  // ==========================================================
-  // STEP 5 - ZOOM TO ASSEMBLY
-  // ==========================================================
-
-  status('Zooming to the selected assembly...');
-
-  await api.viewer.setCamera(selector);
-
-  // ==========================================================
-  // STEP 6 - FINAL GHOST MODE STATUS
-  // ==========================================================
-
-  const nativeGhostState =
-    await tryInspectNativeGhostMode(
-      'Navigation completed'
-    );
-
-  if (nativeGhostState === true) {
+    log('ASSEMBLY NAVIGATION - APPEARANCE RESTORED', {
+      stage: '2D.3B.7C.7',
+      completed: true
+    });
 
     status(
-      'Assembly isolated, highlighted and zoomed. ' +
-      'Native Ghost Mode is ON.'
-    );
-
-  } else {
-
-    status(
-      'Assembly isolated, highlighted and zoomed. ' +
-      'Enable native Ghost Mode in the ' +
-      'Trimble Connect toolbar.'
+      'Model appearance restored. All surrounding objects ' +
+      'should now be fully opaque.'
     );
   }
-
-  log('Assembly navigation completed', {
-    modelId,
-    guid,
-    runtimeId: id,
-    nativeGhostState
-  });
-
-  return true;
 }
 
 // ============================================================
@@ -2559,25 +2560,21 @@ async function attemptAutoNavigation() {
         const completed =
           await findAssembly();
 
-        // Ghost Mode was ON before isolation.
-        // Stop retries until the user turns it OFF.
+        // Automatic transparency replaces the old
+        // native Ghost Mode requirement.
 
-        if (completed === false) {
-
-          autoNavigationPending = false;
-
-          log(
-            'Automatic navigation paused for Ghost Mode'
+        if (completed !== true) {
+          throw new Error(
+            'Automatic assembly navigation did not complete.'
           );
-
-          return;
         }
 
         autoNavigationPending = false;
 
         status(
           'Automatic assembly navigation completed. ' +
-          'Enable native Ghost Mode if required.'
+          'Selected assembly is solid and surrounding ' +
+          'IFC objects are transparent.'
         );
 
         log('Automatic navigation successful', {
@@ -2588,13 +2585,23 @@ async function attemptAutoNavigation() {
 
         return;
 
-      }
-      catch (error) {
+      } catch (error) {
 
         log('Automatic navigation retry', {
           attempt,
           error: error.message
         });
+
+        // Do not retry when appearance changes may
+        // have been partially applied.
+
+        if (fullTransparencyActive) {
+          throw new Error(
+            'Navigation stopped after an appearance error. ' +
+            'Use Restore Model Appearance before retrying. ' +
+            error.message
+          );
+        }
 
         if (
           attempt === AUTO_NAVIGATION_MAX_ATTEMPTS
@@ -2608,8 +2615,7 @@ async function attemptAutoNavigation() {
       }
     }
 
-  }
-  catch (error) {
+  } catch (error) {
 
     autoNavigationPending = false;
 
@@ -2623,8 +2629,7 @@ async function attemptAutoNavigation() {
       String(error)
     );
 
-  }
-  finally {
+  } finally {
 
     autoNavigationRunning = false;
   }
@@ -2647,6 +2652,14 @@ el('read').addEventListener(
 el('find').addEventListener(
   'click',
   run(findAssembly)
+);
+
+// Stage 2D.3B.7C.7
+// Restore model appearance button.
+
+el('restoreNavigation').addEventListener(
+  'click',
+  run(restoreNavigationAppearance)
 );
 
 // ============================================================
@@ -2826,8 +2839,7 @@ if (incomingGuid) {
 
     run(connect)();
 
-  }
-  else {
+  } else {
 
     status(
       'Invalid assembly GUID in navigation URL.'
@@ -2842,3 +2854,10 @@ if (incomingGuid) {
     });
   }
 }
+
+// ============================================================
+// END OF BPA ASSEMBLY NAVIGATOR
+// STAGE 2D.3B.7C.7
+// ============================================================
+
+
