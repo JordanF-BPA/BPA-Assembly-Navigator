@@ -1853,6 +1853,398 @@ async function resetSingleObjectAppearance() {
  }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7C.6D
+ // FULL-MODEL AUTOMATIC TRANSPARENCY
+ // ============================================================
+
+ let fullTransparencyBusy = false;
+ let fullTransparencyActive = false;
+ let fullTransparencyModelId = null;
+ let fullTransparencyBatches = [];
+ let fullTransparencyDetails = null;
+
+ const FULL_TRANSPARENCY_BATCH_SIZE = 50;
+ const FULL_TRANSPARENCY_OPACITY = 0.2;
+
+ function fullTransparencySelector(modelId, ids) {
+   return {
+     modelObjectIds: [{
+       modelId,
+       objectRuntimeIds: ids,
+       recursive: false
+     }]
+   };
+ }
+
+ function fullTransparencyIds(groups, modelId) {
+   const group = Array.isArray(groups)
+     ? groups.find(item => item.modelId === modelId)
+     : null;
+
+   if (!group || !Array.isArray(group.objects)) {
+     throw new Error(
+       'Could not retrieve object IDs for model: ' + modelId
+     );
+   }
+
+   if (group.objects.some(
+     object => !Number.isInteger(object.id)
+   )) {
+     throw new Error(
+       'The viewer returned an unexpected object ID format.'
+     );
+   }
+
+   return [...new Set(
+     group.objects.map(object => object.id)
+   )];
+ }
+
+ function fullTransparencyParentIds(parents) {
+   if (!Array.isArray(parents)) {
+     throw new Error(
+       'Unexpected hierarchy parent response.'
+     );
+   }
+
+   // Accept flat hierarchy entries with integer IDs.
+   // If the viewer returns a nested format, stop safely.
+   if (parents.some(parent =>
+     !parent || !Number.isInteger(parent.id)
+   )) {
+     throw new Error(
+       'Unexpected parent ID format. Review hierarchy diagnostics.'
+     );
+   }
+
+   return parents.map(parent => parent.id);
+ }
+
+ async function testFullModelTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (fullTransparencyBusy) {
+     throw new Error('A full-model operation is already running.');
+   }
+
+   if (fullTransparencyActive) {
+     throw new Error('Restore the previous full-model test first.');
+   }
+
+   if (
+     autoTransparencyActive ||
+     autoTransparencyBusy ||
+     transparencyTestActive ||
+     transparencyTestBusy ||
+     ghostStyleTestActive ||
+     ghostStyleTestBusy ||
+     doesNotEqualTestActive ||
+     doesNotEqualTestBusy ||
+     appearanceTestBusy
+   ) {
+     throw new Error(
+       'Finish or restore all other appearance tests first.'
+     );
+   }
+
+   const modelId = el('model').value;
+   const guid = el('guid').value.trim().toLowerCase();
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   if (!validGuid(guid)) {
+     throw new Error('Enter a valid Tekla assembly GUID.');
+   }
+
+   fullTransparencyBusy = true;
+
+   try {
+
+     status('Resolving the selected assembly...');
+
+     const runtimeIds =
+       await api.viewer.convertToObjectRuntimeIds(
+         modelId,
+         [guid]
+       );
+
+     const selectedRuntimeId = runtimeIds && runtimeIds[0];
+
+     if (!Number.isInteger(selectedRuntimeId)) {
+       throw new Error('Assembly GUID could not be resolved.');
+     }
+
+     const selectedSelector = {
+       modelObjectIds: [{
+         modelId,
+         objectRuntimeIds: [selectedRuntimeId],
+         recursive: true
+       }]
+     };
+
+     status('Retrieving all IFC objects...');
+
+     const allGroups = await api.viewer.getObjects();
+     const selectedGroups =
+       await api.viewer.getObjects(selectedSelector);
+
+     const allIds = fullTransparencyIds(
+       allGroups,
+       modelId
+     );
+
+     const selectedIds = fullTransparencyIds(
+       selectedGroups,
+       modelId
+     );
+
+     if (!selectedIds.includes(selectedRuntimeId)) {
+       throw new Error(
+         'Selected assembly ID missing from protected objects.'
+       );
+     }
+
+     // Protect the assembly and every descendant returned
+     // by the recursive object query.
+
+     const protectedIds = new Set(selectedIds);
+     protectedIds.add(selectedRuntimeId);
+
+     // Also protect hierarchy parents. These may be
+     // containers shared with the selected assembly.
+
+     const parents =
+       await api.viewer.getHierarchyParents(
+         modelId,
+         [selectedRuntimeId]
+       );
+
+     const parentIds = fullTransparencyParentIds(parents);
+
+     for (const id of parentIds) {
+       protectedIds.add(id);
+     }
+
+     const surroundingIds = allIds.filter(
+       id => !protectedIds.has(id)
+     );
+
+     if (surroundingIds.length === 0) {
+       throw new Error(
+         'No surrounding IFC objects were found.'
+       );
+     }
+
+     // Verify no protected IDs appear in the result.
+
+     if (surroundingIds.some(
+       id => protectedIds.has(id)
+     )) {
+       throw new Error(
+         'Protected assembly IDs were included unexpectedly.'
+       );
+     }
+
+     const batches = [];
+
+     for (
+       let i = 0;
+       i < surroundingIds.length;
+       i += FULL_TRANSPARENCY_BATCH_SIZE
+     ) {
+       batches.push(
+         surroundingIds.slice(
+           i,
+           i + FULL_TRANSPARENCY_BATCH_SIZE
+         )
+       );
+     }
+
+     fullTransparencyModelId = modelId;
+     fullTransparencyBatches = [];
+     fullTransparencyActive = true;
+
+     fullTransparencyDetails = {
+       stage: '2D.3B.7C.6D',
+       modelId,
+       selectedGuid: guid,
+       selectedRuntimeId,
+       totalObjectCount: allIds.length,
+       protectedObjectCount: protectedIds.size,
+       protectedIds: [...protectedIds].sort(
+         (a, b) => a - b
+       ),
+       surroundingObjectCount: surroundingIds.length,
+       batchSize: FULL_TRANSPARENCY_BATCH_SIZE,
+       totalBatches: batches.length,
+       requestedOpacity: FULL_TRANSPARENCY_OPACITY,
+       recursive: false
+     };
+
+     log(
+       'FULL-MODEL TRANSPARENCY - PREPARATION',
+       fullTransparencyDetails
+     );
+
+     // Each batch is recorded BEFORE the API call.
+     // This ensures Restore can retry even if the
+     // API partially applies a batch before failing.
+
+     let processed = 0;
+
+     for (let i = 0; i < batches.length; i++) {
+
+       const batchIds = batches[i];
+
+       fullTransparencyBatches.push(batchIds);
+
+       status(
+         'Applying full-model transparency: ' +
+         (i + 1) + '/' + batches.length +
+         ' batches (' + processed + '/' +
+         surroundingIds.length + ' IDs processed)...'
+       );
+
+       await api.viewer.setObjectState(
+         fullTransparencySelector(modelId, batchIds),
+         { opacity: FULL_TRANSPARENCY_OPACITY }
+       );
+
+       processed += batchIds.length;
+
+       log('FULL-MODEL TRANSPARENCY - BATCH', {
+         batch: i + 1,
+         totalBatches: batches.length,
+         processed,
+         total: surroundingIds.length,
+         batchIds
+       });
+
+     }
+
+     log('FULL-MODEL TRANSPARENCY - COMPLETE', {
+       ...fullTransparencyDetails,
+       processed,
+       selectedAppearanceModified: false,
+       restoreAvailable: true
+     });
+
+     status(
+       'Full-model transparency applied to ' +
+       processed +
+       ' surrounding object IDs. Inspect the model, ' +
+       'then use Restore Full-Model Transparency.'
+     );
+
+   } catch (error) {
+
+     if (fullTransparencyActive) {
+       log('FULL-MODEL TRANSPARENCY - INTERRUPTED', {
+         error: error.message,
+         batchesToRestore: fullTransparencyBatches.length,
+         restoreAvailable: true
+       });
+
+       status(
+         'Full-model test interrupted. Use Restore ' +
+         'Full-Model Transparency before trying again.'
+       );
+     }
+
+     throw error;
+
+   } finally {
+     fullTransparencyBusy = false;
+   }
+ }
+
+ async function restoreFullModelTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (fullTransparencyBusy) {
+     throw new Error('A full-model operation is running.');
+   }
+
+   if (!fullTransparencyActive) {
+     status('No active full-model transparency test.');
+     return;
+   }
+
+   fullTransparencyBusy = true;
+
+   try {
+
+     const modelId = fullTransparencyModelId;
+     const batches = fullTransparencyBatches;
+
+     let restored = 0;
+
+     // Restore in reverse order. If restoration fails,
+     // retain the tracking information for another attempt.
+
+     for (let i = batches.length - 1; i >= 0; i--) {
+
+       const ids = batches[i];
+
+       status(
+         'Restoring full-model appearance: ' +
+         (batches.length - i) + '/' +
+         batches.length + ' batches...'
+       );
+
+       await api.viewer.setObjectState(
+         fullTransparencySelector(modelId, ids),
+         { opacity: 1 }
+       );
+
+       restored += ids.length;
+
+       // Remove only successfully restored batches.
+       batches.splice(i, 1);
+     }
+
+     log('FULL-MODEL TRANSPARENCY - RESTORED', {
+       stage: '2D.3B.7C.6D',
+       modelId,
+       restoredObjectCount: restored,
+       completed: true
+     });
+
+     fullTransparencyActive = false;
+     fullTransparencyModelId = null;
+     fullTransparencyBatches = [];
+     fullTransparencyDetails = null;
+
+     status(
+       'Full-model transparency restored. ' +
+       'Check that all surrounding objects are solid again.'
+     );// INITIALISE AUTOMATIC NAVIGATION
+
+   } catch (error) {
+
+     log('FULL-MODEL RESTORE - INTERRUPTED', {
+       error: error.message,
+       remainingBatches: fullTransparencyBatches.length
+     });
+
+     throw error;
+
+   } finally {
+     fullTransparencyBusy = false;
+   }
+ }
+
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -2374,6 +2766,20 @@ el('testAutomaticTransparency').addEventListener(
 el('restoreAutomaticTransparency').addEventListener(
   'click',
   run(restoreAutomaticTransparency)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C.6D - FULL-MODEL TRANSPARENCY BUTTONS
+// ============================================================
+
+el('testFullModelTransparency').addEventListener(
+  'click',
+  run(testFullModelTransparency)
+);
+
+el('restoreFullModelTransparency').addEventListener(
+  'click',
+  run(restoreFullModelTransparency)
 );
 
 // ============================================================
