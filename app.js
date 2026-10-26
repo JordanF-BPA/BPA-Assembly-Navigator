@@ -377,6 +377,137 @@ async function connect() {
  }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7B - VIEWER SETTINGS & OPACITY INVESTIGATION
+ // READ-ONLY DIAGNOSTICS
+ // ============================================================
+
+ async function inspectViewerSettings() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   status('Reading Trimble Connect viewer settings...');
+
+   const settings =
+     await api.viewer.getSettings();
+
+   const presentation =
+     await api.viewer.getPresentation();
+
+   const settingsKeys =
+     settings && typeof settings === 'object'
+       ? Object.keys(settings)
+       : [];
+
+   const ghostRelatedKeys =
+     settingsKeys.filter(key =>
+       /ghost|opacity|transparen|visual|render|display/i.test(key)
+     );
+
+   const report = {
+     stage: '2D.3B.7B',
+     test: 'Viewer Settings',
+     nativeGhostMode: presentation?.ghost ?? 'Not reported',
+     viewerSettings: settings,
+     settingsKeys,
+     ghostRelatedKeys,
+     documentedSettings: [
+       'assemblySelection',
+       'zoomToFitRatio'
+     ],
+     getSettingsAvailable:
+       typeof api.viewer.getSettings === 'function',
+     setSettingsAvailable:
+       typeof api.viewer.setSettings === 'function',
+     settingsModified: false
+   };
+
+   log('VIEWER SETTINGS DIAGNOSTIC REPORT', report);
+
+   status(
+     'Viewer settings read successfully. ' +
+     'Review the diagnostic report.'
+   );
+
+   return report;
+ }
+
+ async function inspectOpacitySupport() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   status('Inspecting opacity and object-state capabilities...');
+
+   const presentation =
+     await api.viewer.getPresentation();
+
+   const settings =
+     await api.viewer.getSettings();
+
+   const viewer = api.viewer;
+
+   const report = {
+     stage: '2D.3B.7B',
+     test: 'Opacity and Object State',
+     nativeGhostMode: presentation?.ghost ?? 'Not reported',
+
+     methods: {
+       setOpacity:
+         typeof viewer.setOpacity === 'function',
+       setObjectState:
+         typeof viewer.setObjectState === 'function',
+       getPresentation:
+         typeof viewer.getPresentation === 'function',
+       getSettings:
+         typeof viewer.getSettings === 'function'
+     },
+
+     documentedOpacityRange: {
+       minimum: 0,
+       maximum: 100,
+       parameterName: 'transparency',
+       scope: '3D viewer'
+     },
+
+     objectSpecificControl: {
+       method: 'setObjectState',
+       acceptsObjectSelector: true,
+       requiresObjectState: true
+     },
+
+     presentationProperties:
+       presentation && typeof presentation === 'object'
+         ? Object.keys(presentation)
+         : [],
+
+     settingsProperties:
+       settings && typeof settings === 'object'
+         ? Object.keys(settings)
+         : [],
+
+     methodsInvoked: [
+       'getPresentation',
+       'getSettings'
+     ],
+
+     viewerModified: false
+   };
+
+   log('OPACITY SUPPORT DIAGNOSTIC REPORT', report);
+
+   status(
+     'Opacity investigation complete. ' +
+     'No viewer appearance changes were made.'
+   );
+
+   return report;
+ }
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -791,6 +922,20 @@ el('inspectGhost').addEventListener(
 el('inspectGhostApi').addEventListener(
   'click',
   run(inspectGhostApiCapabilities)
+);
+
+// ============================================================
+// STAGE 2D.3B.7B - DIAGNOSTIC BUTTONS
+// ============================================================
+
+el('inspectViewerSettings').addEventListener(
+  'click',
+  run(inspectViewerSettings)
+);
+
+el('inspectOpacitySupport').addEventListener(
+  'click',
+  run(inspectOpacitySupport)
 );
 
 // ============================================================
