@@ -694,6 +694,176 @@ await api.viewer.setObjectState(
  }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7C.2 - SINGLE OBJECT APPEARANCE TEST
+ // ============================================================
+
+ let appearanceTestSelector = null;
+ let appearanceTestBusy = false;
+
+ async function getAppearanceTestSelector() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   const guid = el('guid').value.trim().toLowerCase();
+   const modelId = el('model').value;
+
+   if (!validGuid(guid)) {
+     throw new Error('Enter a valid Tekla assembly GUID.');
+   }
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   const runtimeIds =
+     await api.viewer.convertToObjectRuntimeIds(
+       modelId,
+       [guid]
+     );
+
+   const runtimeId = runtimeIds && runtimeIds[0];
+
+   if (!Number.isInteger(runtimeId)) {
+     throw new Error('Assembly GUID could not be resolved.');
+   }
+
+   const selector = {
+     modelObjectIds: [
+       {
+         modelId,
+         objectRuntimeIds: [runtimeId],
+         recursive: true
+       }
+     ]
+   };
+
+   appearanceTestSelector = selector;
+
+   log('APPEARANCE TEST - OBJECT RESOLVED', {
+     modelId,
+     guid,
+     runtimeId
+   });
+
+   return selector;
+ }
+
+ async function testAssemblyColour() {
+
+   if (appearanceTestBusy) {
+     throw new Error('An appearance test is already running.');
+   }
+
+   appearanceTestBusy = true;
+
+   try {
+
+     const selector = await getAppearanceTestSelector();
+
+     status('Testing assembly colour...');
+
+     await api.viewer.setObjectState(
+       selector,
+       {
+         color: '#FF0000'
+       }
+     );
+
+     log('APPEARANCE TEST - COLOUR', {
+       stage: '2D.3B.7C.2',
+       requestedColor: '#FF0000',
+       operationCompleted: true
+     });
+
+     status(
+       'Colour command completed. Check whether the assembly is red.'
+     );
+
+   } finally {
+     appearanceTestBusy = false;
+   }
+ }
+
+ async function testSingleObjectOpacity() {
+
+   if (appearanceTestBusy) {
+     throw new Error('An appearance test is already running.');
+   }
+
+   appearanceTestBusy = true;
+
+   try {
+
+     const selector = await getAppearanceTestSelector();
+
+     status('Testing assembly opacity...');
+
+     await api.viewer.setObjectState(
+       selector,
+       {
+         opacity: 0.2
+       }
+     );
+
+     log('APPEARANCE TEST - OPACITY', {
+       stage: '2D.3B.7C.2',
+       requestedOpacity: 0.2,
+       operationCompleted: true
+     });
+
+     status(
+       'Opacity command completed. Check whether the assembly is transparent.'
+     );
+
+   } finally {
+     appearanceTestBusy = false;
+   }
+ }
+
+ async function resetSingleObjectAppearance() {
+
+   if (appearanceTestBusy) {
+     throw new Error('An appearance test is already running.');
+   }
+
+   if (!appearanceTestSelector) {
+     status('No assembly appearance test to reset.');
+     return;
+   }
+
+   appearanceTestBusy = true;
+
+   try {
+
+     status('Resetting assembly appearance...');
+
+     await api.viewer.setObjectState(
+       appearanceTestSelector,
+       {
+         color: 'reset',
+         opacity: 'reset'
+       }
+     );
+
+     appearanceTestSelector = null;
+
+     log('APPEARANCE TEST - RESET', {
+       stage: '2D.3B.7C.2',
+       operationCompleted: true
+     });
+
+     status(
+       'Appearance reset requested. Check the model.'
+     );
+
+   } finally {
+     appearanceTestBusy = false;
+   }
+ }
+
 
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
@@ -1137,6 +1307,25 @@ el('testTransparency').addEventListener(
 el('restoreTransparency').addEventListener(
   'click',
   run(restoreAssemblyAppearance)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C.2 - APPEARANCE TEST BUTTONS
+// ============================================================
+
+el('testAssemblyColour').addEventListener(
+  'click',
+  run(testAssemblyColour)
+);
+
+el('testSingleOpacity').addEventListener(
+  'click',
+  run(testSingleObjectOpacity)
+);
+
+el('resetSingleAppearance').addEventListener(
+  'click',
+  run(resetSingleObjectAppearance)
 );
 
 // ============================================================
