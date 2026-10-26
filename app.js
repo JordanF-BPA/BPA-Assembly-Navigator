@@ -876,6 +876,178 @@ async function resetSingleObjectAppearance() {
 }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7C.4 - GHOST-STYLE TRANSPARENCY TEST
+ // ============================================================
+
+ let ghostStyleTestActive = false;
+ let ghostStyleTestBusy = false;
+ let ghostStyleTestSelector = null;
+
+ async function testGhostStyleTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (ghostStyleTestBusy) {
+     throw new Error('A Ghost-style operation is already running.');
+   }
+
+   if (ghostStyleTestActive) {
+     throw new Error('Restore the previous Ghost-style test first.');
+   }
+
+   const guid = el('guid').value.trim().toLowerCase();
+   const modelId = el('model').value;
+
+   if (!validGuid(guid)) {
+     throw new Error('Enter a valid Tekla assembly GUID.');
+   }
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   ghostStyleTestBusy = true;
+
+   try {
+
+     status('Resolving assembly for Ghost-style test...');
+
+     const runtimeIds =
+       await api.viewer.convertToObjectRuntimeIds(
+         modelId,
+         [guid]
+       );
+
+     const runtimeId = runtimeIds && runtimeIds[0];
+
+     if (!Number.isInteger(runtimeId)) {
+       throw new Error('Assembly GUID could not be resolved.');
+     }
+
+     const selector = {
+       modelObjectIds: [
+         {
+           modelId,
+           objectRuntimeIds: [runtimeId],
+           recursive: true
+         }
+       ]
+     };
+
+     // Record state before changing appearance.
+     ghostStyleTestActive = true;
+     ghostStyleTestSelector = selector;
+
+     status('Making surrounding model transparent...');
+
+     // Apply 20% opacity to the viewer's loaded objects.
+     // The undefined selector is experimental for this scope.
+     await api.viewer.setObjectState(
+       undefined,
+       {
+         opacity: 0.2
+       }
+     );
+
+     status('Restoring selected assembly to solid...');
+
+     await api.viewer.setObjectState(
+       selector,
+       {
+         opacity: 1
+       }
+     );
+
+     // Do not set a colour override on the assembly.
+     // Its original IFC material colour should remain.
+     await api.viewer.setSelection(selector, 'set');
+     await api.viewer.setCamera(selector);
+
+     log('GHOST-STYLE TRANSPARENCY TEST', {
+       stage: '2D.3B.7C.4',
+       modelId,
+       guid,
+       runtimeId,
+       surroundingRequestedOpacity: 0.2,
+       selectedRequestedOpacity: 1,
+       selectedColourModified: false,
+       active: true
+     });
+
+     status(
+       'Ghost-style appearance requested. Check whether ' +
+       'surrounding steel is transparent and the assembly is solid.'
+     );
+
+   } finally {
+
+     ghostStyleTestBusy = false;
+
+   }
+ }
+
+ async function restoreGhostStyleTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (ghostStyleTestBusy) {
+     throw new Error('A Ghost-style operation is already running.');
+   }
+
+   if (!ghostStyleTestActive) {
+     status('No active Ghost-style test to restore.');
+     return;
+   }
+
+   ghostStyleTestBusy = true;
+
+   try {
+
+     status('Restoring model opacity...');
+
+     await api.viewer.setObjectState(
+       undefined,
+       {
+         opacity: 1
+       }
+     );
+
+     // Clear any colour override on the selected assembly
+     // without modifying opacity in the same call.
+     await api.viewer.setObjectState(
+       ghostStyleTestSelector,
+       {
+         color: 'reset'
+       }
+     );
+
+     ghostStyleTestActive = false;
+     ghostStyleTestSelector = null;
+
+     log('GHOST-STYLE APPEARANCE RESTORE', {
+       stage: '2D.3B.7C.4',
+       requestedModelOpacity: 1,
+       selectedColourReset: true
+     });
+
+     status(
+       'Appearance restoration requested. ' +
+       'Check that the original model colours and opacity have returned.'
+     );
+
+   } finally {
+
+     ghostStyleTestBusy = false;
+
+   }
+ }
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -1337,6 +1509,20 @@ el('testSingleOpacity').addEventListener(
 el('resetSingleAppearance').addEventListener(
   'click',
   run(resetSingleObjectAppearance)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C.4 - GHOST-STYLE BUTTONS
+// ============================================================
+
+el('testGhostStyle').addEventListener(
+  'click',
+  run(testGhostStyleTransparency)
+);
+
+el('restoreGhostStyle').addEventListener(
+  'click',
+  run(restoreGhostStyleTransparency)
 );
 
 // ============================================================
