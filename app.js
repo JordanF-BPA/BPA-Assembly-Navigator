@@ -1048,6 +1048,214 @@ async function resetSingleObjectAppearance() {
  }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7C.5 - DOES NOT EQUAL TEST
+ // ============================================================
+
+ let doesNotEqualTestBusy = false;
+ let doesNotEqualTestSelector = null;
+ let doesNotEqualTestActive = false;
+
+ async function resolveDoesNotEqualAssembly(modelId, guid) {
+
+   const runtimeIds =
+     await api.viewer.convertToObjectRuntimeIds(
+       modelId,
+       [guid]
+     );
+
+   const runtimeId = runtimeIds && runtimeIds[0];
+
+   if (!Number.isInteger(runtimeId)) {
+     throw new Error(
+       'Could not resolve assembly GUID: ' + guid
+     );
+   }
+
+   return {
+     runtimeId,
+     selector: {
+       modelObjectIds: [{
+         modelId,
+         objectRuntimeIds: [runtimeId],
+         recursive: true
+       }]
+     }
+   };
+ }
+
+ async function testDoesNotEqualTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (doesNotEqualTestBusy) {
+     throw new Error('A Does Not Equal test is running.');
+   }
+
+   if (doesNotEqualTestActive) {
+     throw new Error('Restore the previous test first.');
+   }
+
+   if (ghostStyleTestActive || transparencyTestActive) {
+     throw new Error(
+       'Restore the earlier transparency test before continuing.'
+     );
+   }
+
+   const modelId = el('model').value;
+   const selectedGuid = el('guid').value.trim().toLowerCase();
+   const surroundingGuid =
+     el('excludedTestGuid').value.trim().toLowerCase();
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   if (!validGuid(selectedGuid) ||
+       !validGuid(surroundingGuid)) {
+     throw new Error('Enter two valid assembly GUIDs.');
+   }
+
+   if (selectedGuid === surroundingGuid) {
+     throw new Error(
+       'The two assembly GUIDs must be different.'
+     );
+   }
+
+   doesNotEqualTestBusy = true;
+
+   try {
+
+     status('Resolving both assemblies...');
+
+     const selected =
+       await resolveDoesNotEqualAssembly(
+         modelId,
+         selectedGuid
+       );
+
+     const surrounding =
+       await resolveDoesNotEqualAssembly(
+         modelId,
+         surroundingGuid
+       );
+
+     if (selected.runtimeId === surrounding.runtimeId) {
+       throw new Error(
+         'Both GUIDs resolved to the same runtime object.'
+       );
+     }
+
+     log('DOES NOT EQUAL - COMPARISON', {
+       stage: '2D.3B.7C.5',
+       selectedGuid,
+       surroundingGuid,
+       selectedRuntimeId: selected.runtimeId,
+       surroundingRuntimeId: surrounding.runtimeId,
+       doesNotEqual:
+         surrounding.runtimeId !== selected.runtimeId
+     });
+
+     // This is the Does Not Equal condition.
+     // Only the second assembly is modified.
+
+     if (surrounding.runtimeId !== selected.runtimeId) {
+
+       // Store the selector before changing appearance,
+       // so restoration remains available if a later step fails.
+       doesNotEqualTestSelector = surrounding.selector;
+       doesNotEqualTestActive = true;
+
+       status('Making the surrounding assembly transparent...');
+
+       await api.viewer.setObjectState(
+         surrounding.selector,
+         {
+           opacity: 0.2
+         }
+       );
+     }
+
+     // Leave the selected assembly's colour and opacity untouched.
+     // This is important for preserving its original IFC appearance.
+
+     await api.viewer.setSelection(
+       selected.selector,
+       'set'
+     );
+
+     await api.viewer.setCamera(
+       selected.selector
+     );
+
+     log('DOES NOT EQUAL - TEST COMPLETE', {
+       stage: '2D.3B.7C.5',
+       surroundingRequestedOpacity: 0.2,
+       selectedAppearanceModified: false,
+       testActive: doesNotEqualTestActive
+     });
+
+     status(
+       'Does Not Equal test completed. ' +
+       'Check that only the second assembly became transparent.'
+     );
+
+   } finally {
+     doesNotEqualTestBusy = false;
+   }
+ }
+
+ async function restoreDoesNotEqualTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (doesNotEqualTestBusy) {
+     throw new Error('A Does Not Equal test is running.');
+   }
+
+   if (!doesNotEqualTestActive ||
+       !doesNotEqualTestSelector) {
+     status('No active Does Not Equal test to restore.');
+     return;
+   }
+
+   doesNotEqualTestBusy = true;
+
+   try {
+
+     status('Restoring surrounding assembly opacity...');
+
+     await api.viewer.setObjectState(
+       doesNotEqualTestSelector,
+       {
+         opacity: 1
+       }
+     );
+
+     doesNotEqualTestActive = false;
+     doesNotEqualTestSelector = null;
+
+     log('DOES NOT EQUAL - RESTORE', {
+       stage: '2D.3B.7C.5',
+       requestedOpacity: 1,
+       completed: true
+     });
+
+     status(
+       'Surrounding assembly opacity restored. ' +
+       'Check its original appearance.'
+     );
+
+   } finally {
+     doesNotEqualTestBusy = false;
+   }
+ }
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -1523,6 +1731,20 @@ el('testGhostStyle').addEventListener(
 el('restoreGhostStyle').addEventListener(
   'click',
   run(restoreGhostStyleTransparency)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C.5 - DOES NOT EQUAL BUTTONS
+// ============================================================
+
+el('testDoesNotEqual').addEventListener(
+  'click',
+  run(testDoesNotEqualTransparency)
+);
+
+el('restoreDoesNotEqual').addEventListener(
+  'click',
+  run(restoreDoesNotEqualTransparency)
 );
 
 // ============================================================
