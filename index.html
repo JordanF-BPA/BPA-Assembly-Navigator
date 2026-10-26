@@ -90,6 +90,39 @@
   </button>
 </div>	  
 
+<div class="ghost-controls">
+  <label for="excludedTestGuid">
+    Stage 2D.3B.7C.5 — Does Not Equal Test
+  </label>
+
+  <p class="help">
+    Main Tekla GUID = assembly to keep solid.
+    Second GUID = different assembly to make transparent.
+  </p>
+
+  <label for="excludedTestGuid">
+    Surrounding assembly GUID
+  </label>
+
+  <input
+    id="excludedTestGuid"
+    type="text"
+    spellcheck="false"
+    placeholder="Enter a different assembly GUID"
+  >
+
+  <button id="testDoesNotEqual" type="button">
+    Test Does Not Equal Transparency
+  </button>
+
+  <button id="restoreDoesNotEqual" type="button">
+    Restore Surrounding Assembly
+  </button>
+</div>
+
+<div class="actions">
+  <button id="connect" type="button">
+	  
 <div class="actions">
   <button id="connect" type="button">
     Connect / Refresh Models
