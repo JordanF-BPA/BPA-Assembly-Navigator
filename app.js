@@ -1256,6 +1256,175 @@ async function resetSingleObjectAppearance() {
  }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7C.6A - IFC OBJECT DISCOVERY
+ // READ-ONLY DIAGNOSTICS
+ // ============================================================
+
+ let objectDiscoveryBusy = false;
+
+ async function inspectIfcObjectDiscovery() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (objectDiscoveryBusy) {
+     throw new Error('Object discovery is already running.');
+   }
+
+   const modelId = el('model').value;
+   const guid = el('guid').value.trim().toLowerCase();
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   if (!validGuid(guid)) {
+     throw new Error('Enter a valid Tekla assembly GUID.');
+   }
+
+   objectDiscoveryBusy = true;
+
+   try {
+
+     status('Inspecting IFC object discovery capabilities...');
+
+     // Read method names from the viewer and its prototypes.
+     // Do not execute unknown methods.
+
+     function collectMethods(object) {
+
+       const methods = new Set();
+       let current = object;
+       let depth = 0;
+
+       while (current && depth < 5) {
+
+         for (const name of Object.getOwnPropertyNames(current)) {
+
+           if (name === 'constructor') continue;
+
+           try {
+             if (typeof object[name] === 'function') {
+               methods.add(name);
+             }
+           } catch (_) {
+             // Ignore inaccessible properties.
+           }
+         }
+
+         current = Object.getPrototypeOf(current);
+         depth++;
+       }
+
+       return Array.from(methods).sort();
+     }
+
+     const viewerMethods = collectMethods(api.viewer);
+
+     const discoveryMethods = viewerMethods.filter(name =>
+       /object|entity|hierarch|tree|child|parent|model|propert|assembl|guid/i
+         .test(name)
+     );
+
+     const candidateNames = [
+       'getObjects',
+       'getObject',
+       'getObjectTree',
+       'getObjectHierarchy',
+       'getModelObjects',
+       'getModelObjectIds',
+       'getObjectProperties',
+       'getObjectChildren',
+       'getChildren',
+       'getEntities',
+       'getModels',
+       'getSelection',
+       'getObjectData',
+       'convertToObjectRuntimeIds',
+       'convertToObjectIds'
+     ];
+
+     const candidateMethods = candidateNames.map(name => ({
+       name,
+       available: typeof api.viewer[name] === 'function'
+     }));
+
+     // Only invoke methods whose signatures are already
+     // used successfully in this project.
+
+     const models = await api.viewer.getModels();
+
+     const runtimeIds =
+       await api.viewer.convertToObjectRuntimeIds(
+         modelId,
+         [guid]
+       );
+
+     const selectedRuntimeId = runtimeIds && runtimeIds[0];
+
+     if (!Number.isInteger(selectedRuntimeId)) {
+       throw new Error(
+         'Selected assembly GUID could not be resolved.'
+       );
+     }
+
+     const selectedSelector = {
+       modelObjectIds: [{
+         modelId,
+         objectRuntimeIds: [selectedRuntimeId],
+         recursive: true
+       }]
+     };
+
+     const report = {
+       stage: '2D.3B.7C.6A',
+       mode: 'Read-only',
+
+       modelId,
+       selectedGuid: guid,
+       selectedRuntimeId,
+
+       selectedSelector,
+
+       loadedModelCount: Array.isArray(models)
+         ? models.length
+         : null,
+
+       loadedModels: models,
+
+       discoveryMethods,
+       candidateMethods,
+
+       apiNamespaces: Object.keys(api || {}),
+
+       notes: [
+         'No object appearance was modified.',
+         'No isolation or camera operation was performed.',
+         'Available method names do not confirm their signatures.',
+         'Complete IFC hierarchy retrieval is not yet proven.',
+         'Recursive selection does not provide child IDs directly.'
+       ]
+     };
+
+     log('STAGE 2D.3B.7C.6A - OBJECT DISCOVERY', report);
+
+     status(
+       'Object discovery inspection completed. ' +
+       'Copy the diagnostic report for review.'
+     );
+
+     return report;
+
+   } finally {
+
+     objectDiscoveryBusy = false;
+
+   }
+ }
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -1745,6 +1914,15 @@ el('testDoesNotEqual').addEventListener(
 el('restoreDoesNotEqual').addEventListener(
   'click',
   run(restoreDoesNotEqualTransparency)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C.6A - OBJECT DISCOVERY BUTTON
+// ============================================================
+
+el('inspectObjectDiscovery').addEventListener(
+  'click',
+  run(inspectIfcObjectDiscovery)
 );
 
 // ============================================================
