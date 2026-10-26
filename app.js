@@ -1593,6 +1593,266 @@ async function resetSingleObjectAppearance() {
  }
 
 
+ // ============================================================
+ // STAGE 2D.3B.7C.6C
+ // CONTROLLED AUTOMATIC SURROUNDING TRANSPARENCY
+ // ============================================================
+
+ let autoTransparencyBusy = false;
+ let autoTransparencyActive = false;
+ let autoTransparencySelector = null;
+ let autoTransparencyDetails = null;
+
+ const AUTO_TRANSPARENCY_BATCH_SIZE = 10;
+
+ async function testAutomaticTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (autoTransparencyBusy) {
+     throw new Error('Automatic transparency test is running.');
+   }
+
+   if (autoTransparencyActive) {
+     throw new Error('Restore the previous automatic test first.');
+   }
+
+   if (
+     transparencyTestActive ||
+     ghostStyleTestActive ||
+     doesNotEqualTestActive
+   ) {
+     throw new Error(
+       'Restore all earlier transparency tests before continuing.'
+     );
+   }
+
+   const modelId = el('model').value;
+   const guid = el('guid').value.trim().toLowerCase();
+
+   if (!modelId) {
+     throw new Error('Select a loaded IFC model.');
+   }
+
+   if (!validGuid(guid)) {
+     throw new Error('Enter a valid Tekla assembly GUID.');
+   }
+
+   autoTransparencyBusy = true;
+
+   try {
+
+     status('Resolving selected assembly...');
+
+     const runtimeIds =
+       await api.viewer.convertToObjectRuntimeIds(
+         modelId,
+         [guid]
+       );
+
+     const selectedRuntimeId = runtimeIds && runtimeIds[0];
+
+     if (!Number.isInteger(selectedRuntimeId)) {
+       throw new Error('Assembly GUID could not be resolved.');
+     }
+
+     const selectedSelector = {
+       modelObjectIds: [{
+         modelId,
+         objectRuntimeIds: [selectedRuntimeId],
+         recursive: true
+       }]
+     };
+
+     status('Retrieving IFC object hierarchy...');
+
+     const allGroups = await api.viewer.getObjects();
+
+     const protectedGroups =
+       await api.viewer.getObjects(selectedSelector);
+
+     const allGroup = allGroups.find(
+       group => group.modelId === modelId
+     );
+
+     const protectedGroup = protectedGroups.find(
+       group => group.modelId === modelId
+     );
+
+     if (!allGroup || !Array.isArray(allGroup.objects)) {
+       throw new Error('Could not retrieve IFC model objects.');
+     }
+
+     if (
+       !protectedGroup ||
+       !Array.isArray(protectedGroup.objects)
+     ) {
+       throw new Error('Could not retrieve selected assembly objects.');
+     }
+
+     const allIds = allGroup.objects
+       .map(object => object.id)
+       .filter(Number.isInteger);
+
+     const protectedIds = new Set(
+       protectedGroup.objects
+         .map(object => object.id)
+         .filter(Number.isInteger)
+     );
+
+     protectedIds.add(selectedRuntimeId);
+
+     // Also exclude the selected assembly's hierarchy ancestors.
+     // This avoids applying an appearance override directly
+     // to a parent container of the selected assembly.
+
+     const parents = await api.viewer.getHierarchyParents(
+       modelId,
+       [selectedRuntimeId]
+     );
+
+     const ancestorIds = [];
+
+     for (const parent of parents || []) {
+       if (Number.isInteger(parent.id)) {
+         protectedIds.add(parent.id);
+         ancestorIds.push(parent.id);
+       }
+     }
+
+     const surroundingIds = Array.from(new Set(allIds))
+       .filter(id => !protectedIds.has(id));
+
+     // Restrict this first test to a small batch.
+     // Do not recursively affect hierarchy descendants.
+
+     const batchIds = surroundingIds.slice(
+       0,
+       AUTO_TRANSPARENCY_BATCH_SIZE
+     );
+
+     if (batchIds.length === 0) {
+       throw new Error('No surrounding objects were found.');
+     }
+
+     const surroundingSelector = {
+       modelObjectIds: [{
+         modelId,
+         objectRuntimeIds: batchIds,
+         recursive: false
+       }]
+     };
+
+     const details = {
+       stage: '2D.3B.7C.6C',
+       modelId,
+       selectedGuid: guid,
+       selectedRuntimeId,
+       totalObjectIds: allIds.length,
+       protectedObjectIds: Array.from(protectedIds).sort(
+         (a, b) => a - b
+       ),
+       ancestorIds,
+       surroundingObjectCount: surroundingIds.length,
+       batchIds,
+       requestedOpacity: 0.2,
+       recursive: false
+     };
+
+     log('AUTOMATIC TRANSPARENCY - PREPARATION', details);
+
+     // Save the selector before changing appearance so
+     // the Restore button remains available after an error.
+
+     autoTransparencySelector = surroundingSelector;
+     autoTransparencyDetails = details;
+     autoTransparencyActive = true;
+
+     status(
+       'Applying transparency to ' +
+       batchIds.length +
+       ' surrounding object IDs...'
+     );
+
+     await api.viewer.setObjectState(
+       surroundingSelector,
+       {
+         opacity: 0.2
+       }
+     );
+
+     // Do not modify the selected assembly's appearance.
+     // Do not isolate objects or change the camera.
+
+     log('AUTOMATIC TRANSPARENCY - APPLIED', {
+       ...details,
+       selectedAssemblyAppearanceModified: false,
+       restoreAvailable: true
+     });
+
+     status(
+       'Automatic transparency batch applied. ' +
+       'Inspect the model and use Restore Automatic Transparency.'
+     );
+
+   } finally {
+     autoTransparencyBusy = false;
+   }
+ }
+
+ async function restoreAutomaticTransparency() {
+
+   if (!api) {
+     throw new Error('Connect to Trimble Connect first.');
+   }
+
+   if (autoTransparencyBusy) {
+     throw new Error('Automatic transparency operation is running.');
+   }
+
+   if (!autoTransparencyActive || !autoTransparencySelector) {
+     status('No active automatic transparency test to restore.');
+     return;
+   }
+
+   autoTransparencyBusy = true;
+
+   try {
+
+     status('Restoring automatic transparency batch...');
+
+     await api.viewer.setObjectState(
+       autoTransparencySelector,
+       {
+         opacity: 1
+       }
+     );
+
+     log('AUTOMATIC TRANSPARENCY - RESTORED', {
+       stage: '2D.3B.7C.6C',
+       modelId: autoTransparencyDetails.modelId,
+       restoredIds: autoTransparencyDetails.batchIds,
+       requestedOpacity: 1,
+       completed: true
+     });
+
+     autoTransparencyActive = false;
+     autoTransparencySelector = null;
+     autoTransparencyDetails = null;
+
+     status(
+       'Automatic transparency batch restored. ' +
+       'Check that original appearance has returned.'
+     );
+
+   } finally {
+     autoTransparencyBusy = false;
+   }
+ }
+
+
 // ============================================================
 // READ CURRENTLY SELECTED OBJECT
 // ============================================================
@@ -2100,6 +2360,20 @@ el('inspectObjectDiscovery').addEventListener(
 el('inspectIfcHierarchy').addEventListener(
   'click',
   run(inspectIfcHierarchy)
+);
+
+// ============================================================
+// STAGE 2D.3B.7C.6C - AUTOMATIC TRANSPARENCY BUTTONS
+// ============================================================
+
+el('testAutomaticTransparency').addEventListener(
+  'click',
+  run(testAutomaticTransparency)
+);
+
+el('restoreAutomaticTransparency').addEventListener(
+  'click',
+  run(restoreAutomaticTransparency)
 );
 
 // ============================================================
