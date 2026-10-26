@@ -6,14 +6,14 @@
   <title>BPA Assembly Navigator</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js" defer></script>
-<script src="app.js?v=2D3B-19" defer></script>
+<script src="app.js?v=2D3B-20" defer></script>
 </head>
 <body>
 <header>
   <div class="brand">BPA</div>
   <div>
     <h1>Assembly Navigator</h1>
-<p>Trimble Connect • Stage 2D.3B.7C.5</p>
+<p>Trimble Connect • Stage 2D.3B.7C.6A</p>
   </div>
 </header>
   <main>
@@ -119,6 +119,21 @@
     Restore Surrounding Assembly
   </button>
 </div>
+
+<div class="ghost-controls">
+  <label>
+    Stage 2D.3B.7C.6A — IFC Object Discovery
+  </label>
+
+  <p class="help">
+    Read-only investigation of the IFC model hierarchy
+    and available object retrieval methods.
+  </p>
+
+  <button id="inspectObjectDiscovery" type="button">
+    Inspect IFC Object Discovery
+  </button>
+</div>	  
 
 <div class="actions">
   <button id="connect" type="button">
