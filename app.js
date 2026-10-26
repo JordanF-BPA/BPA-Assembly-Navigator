@@ -591,23 +591,26 @@ async function connect() {
      transparencyTestActive = true;
      transparencyTestSelector = selector;
 
-     await api.viewer.setObjectState(
-       undefined,
-       {
-         visible: true,
-         opacity: 50
-       }
-     );
+await api.viewer.setObjectState(
+  undefined,
+  {
+    opacity: 50
+  }
+);
 
      status('Restoring selected assembly to full opacity...');
 
-     await api.viewer.setObjectState(
-       selector,
-       {
-         visible: true,
-         opacity: 1
-       }
-     );
+// Temporarily disabled for opacity testing.
+// We first need to confirm that the viewer
+// supports transparency through setObjectState().
+
+// await api.viewer.setObjectState(
+//   selector,
+//   {
+//     visible: true,
+//     opacity: 1
+//   }
+// );
 
      await api.viewer.setSelection(selector, 'set');
 
