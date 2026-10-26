@@ -823,46 +823,57 @@ await api.viewer.setObjectState(
    }
  }
 
- async function resetSingleObjectAppearance() {
+// ============================================================
+// STAGE 2D.3B.7C.3 - COLOUR RESET INVESTIGATION
+// ============================================================
 
-   if (appearanceTestBusy) {
-     throw new Error('An appearance test is already running.');
-   }
+async function resetSingleObjectAppearance() {
 
-   if (!appearanceTestSelector) {
-     status('No assembly appearance test to reset.');
-     return;
-   }
+  if (!api) {
+    throw new Error('Connect to Trimble Connect first.');
+  }
 
-   appearanceTestBusy = true;
+  if (appearanceTestBusy) {
+    throw new Error('An appearance test is already running.');
+  }
 
-   try {
+  if (!appearanceTestSelector) {
+    status('Run the colour test first.');
+    return;
+  }
 
-     status('Resetting assembly appearance...');
+  appearanceTestBusy = true;
 
-     await api.viewer.setObjectState(
-       appearanceTestSelector,
-       {
-         color: 'reset',
-         opacity: 'reset'
-       }
-     );
+  try {
 
-     appearanceTestSelector = null;
+    status('Testing original IFC colour restoration...');
 
-     log('APPEARANCE TEST - RESET', {
-       stage: '2D.3B.7C.2',
-       operationCompleted: true
-     });
+    const result = await api.viewer.setObjectState(
+      appearanceTestSelector,
+      {
+        color: 'reset'
+      }
+    );
 
-     status(
-       'Appearance reset requested. Check the model.'
-     );
+    log('STAGE 2D.3B.7C.3 - COLOUR RESET', {
+      method: 'setObjectState',
+      requestedColor: 'reset',
+      opacityModified: false,
+      apiResult: result ?? 'No return value',
+      test: 'Check whether original IFC colour returns'
+    });
 
-   } finally {
-     appearanceTestBusy = false;
-   }
- }
+    status(
+      'Colour reset command completed. ' +
+      'Check whether the original IFC colour has returned.'
+    );
+
+  } finally {
+
+    appearanceTestBusy = false;
+
+  }
+}
 
 
 // ============================================================
