@@ -130,10 +130,30 @@ will be investigated in the next stage.
     document.getElementById("project").textContent =
         project.href;
 
-    status.textContent =
-        "Navigation request validated successfully.";
+status.textContent =
+    "Navigation request validated successfully.";
 
-    button.disabled = false;
+button.disabled = false;
+
+// STAGE 9D.5B.1 - STORAGE TEST
+try {
+    localStorage.setItem(
+        "BPA_NAVIGATOR_STORAGE_TEST",
+        teklaGuid
+    );
+
+    console.log(
+        "[BPA Storage Test] Saved:",
+        localStorage.getItem(
+            "BPA_NAVIGATOR_STORAGE_TEST"
+        )
+    );
+} catch (error) {
+    console.error(
+        "[BPA Storage Test] Write failed:",
+        error
+    );
+}
 
     button.addEventListener("click", function () {
         window.location.assign(project.href);
