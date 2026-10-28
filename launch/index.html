@@ -78,7 +78,14 @@ will be investigated in the next stage.
 
     const teklaGuid = params.get("teklaGuid") || "";
     const ifcGuid = params.get("ifcGuid") || "";
-    const projectUrl = params.get("projectUrl") || "";
+const projectKey = params.get("projectKey") || "";
+
+const projects = {
+    "test-project":
+        "https://web.connect.trimble.com/projects/l7enVCZktZA/viewer/3d/?modelId=LPDL2Rmxp1E"
+};
+
+const projectUrl = projects[projectKey] || "";
 
     const status = document.getElementById("status");
     const button = document.getElementById("open");
