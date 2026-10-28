@@ -21,6 +21,31 @@
 'use strict';
 
 // ============================================================
+// STAGE 9D.5B.1 - STORAGE DIAGNOSTIC
+// ============================================================
+
+try {
+    const storedGuid = localStorage.getItem(
+        'BPA_NAVIGATOR_STORAGE_TEST'
+    );
+
+    console.log(
+        '[BPA Storage Test] Origin:',
+        window.location.origin
+    );
+
+    console.log(
+        '[BPA Storage Test] Retrieved GUID:',
+        storedGuid || 'NOT FOUND'
+    );
+} catch (error) {
+    console.error(
+        '[BPA Storage Test] Read failed:',
+        error
+    );
+}
+
+// ============================================================
 // GLOBAL STATE
 // ============================================================
 
