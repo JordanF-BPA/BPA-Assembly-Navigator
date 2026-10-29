@@ -166,10 +166,12 @@ function updateButtons() {
     connectionBusy ||
     autoNavigationRunning;
 
-  el('connect').disabled = busy;
+el('connect').disabled = busy;
 
-  el('find').disabled =
-    busy || !api;
+el('pasteDrawingGuid').disabled = busy;
+
+el('find').disabled =
+  busy || !api;
 
   el('restoreNavigation').disabled =
     busy ||
@@ -1011,19 +1013,114 @@ async function attemptAutoNavigation() {
 }
 
 // ============================================================
+// STAGE 9D.6F.2A - DRAWING GUID CLIPBOARD NAVIGATION
+// ============================================================
+
+async function pasteDrawingGuidAndConnect() {
+
+  if (
+    connectionBusy ||
+    assemblyNavigationBusy ||
+    fullTransparencyBusy ||
+    autoNavigationRunning
+  ) {
+    throw new Error(
+      'Wait for the current operation to finish.'
+    );
+  }
+
+  if (!navigator.clipboard ||
+      !navigator.clipboard.readText) {
+    throw new Error(
+      'Clipboard access is unavailable. ' +
+      'Paste the GUID manually instead.'
+    );
+  }
+
+  let clipboardText;
+
+  try {
+    clipboardText = await navigator.clipboard.readText();
+  } catch (error) {
+    throw new Error(
+      'Clipboard permission was denied. ' +
+      'Allow clipboard access in Edge or paste manually.'
+    );
+  }
+
+  const guid = clipboardText
+    .trim()
+    .replace(/^["'{\s]+|["'}\s]+$/g, '')
+    .trim()
+    .toLowerCase();
+
+  if (!validGuid(guid)) {
+    throw new Error(
+      'The clipboard does not contain a valid ' +
+      '36-character Tekla assembly GUID.'
+    );
+  }
+
+  // Populate the existing Navigator field.
+  el('guid').value = guid;
+
+  log('Drawing assembly GUID received from clipboard', {
+    guid
+  });
+
+  status('Drawing GUID received. Connecting to viewer...');
+
+  // Connect and refresh available IFC models.
+  await connect();
+
+  if (!api) {
+    throw new Error(
+      'Could not connect to Trimble Connect.'
+    );
+  }
+
+  if (!el('model').value) {
+    throw new Error(
+      'No IFC model is available. ' +
+      'Load the required model in the 3D Viewer.'
+    );
+  }
+
+  // Reuse the existing selection, transparency and zoom logic.
+  const completed = await findAssembly();
+
+  if (completed !== true) {
+    throw new Error(
+      'Assembly navigation did not complete.'
+    );
+  }
+
+  status(
+    'Drawing assembly located. ' +
+    'Surrounding steelwork is transparent.'
+  );
+}
+
+// ============================================================
 // EVENT LISTENERS
 // ============================================================
+
+
 
 el('connect').addEventListener(
   'click',
   run(connect)
 );
 
+el('pasteDrawingGuid').addEventListener(
+  'click',
+  run(pasteDrawingGuidAndConnect)
+);
+
 el('find').addEventListener(
   'click',
   run(findAssembly)
 );
-
 el('restoreNavigation').addEventListener(
   'click',
   run(restoreNavigationAppearance)
