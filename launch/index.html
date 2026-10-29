@@ -138,9 +138,14 @@ const projectUrl = projects[projectKey] || "";
         project.href;
 
 status.textContent =
-    "Navigation request validated successfully.";
+"Navigation request validated successfully. " +
+"Opening Trimble Connect...";
 
-button.disabled = false;
+button.disabled = true;
+
+// Stage 9D.6G.1
+// Automatically open the validated Trimble Connect project.
+window.location.replace(project.href);
 
 // STAGE 9D.5B.1 - STORAGE TEST
 try {
