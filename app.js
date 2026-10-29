@@ -84,7 +84,7 @@ const navigationParams = new URLSearchParams(
 const rawIncomingGuid =
   navigationParams.get('teklaGuid') || '';
 
-const incomingGuid = rawIncomingGuid
+let incomingGuid = rawIncomingGuid
   .trim()
   .replace(/^["'{\s]+|["'}\s]+$/g, '')
   .trim()
@@ -1142,6 +1142,93 @@ el('guid').addEventListener(
     }
   }
 );
+
+// ============================================================
+// STAGE 9D.6G.2D - CHROME BRIDGE GUID RECEIVER
+// ============================================================
+
+let bridgeNavigationGuid = "";
+
+window.addEventListener("message", async (event) => {
+
+    // Only accept messages from the Trimble Connect parent.
+    if (
+        event.origin !== "https://web.connect.trimble.com" ||
+        event.source !== window.parent
+    ) {
+        return;
+    }
+
+    const message = event.data;
+
+    if (
+        !message ||
+        message.type !== "BPA_NAVIGATE_ASSEMBLY"
+    ) {
+        return;
+    }
+
+    const guid = String(message.teklaGuid || "")
+        .trim()
+        .toLowerCase();
+
+    if (!validGuid(guid)) {
+        log("Chrome Bridge supplied an invalid GUID.");
+        return;
+    }
+
+    // Acknowledge receipt so the Bridge can stop sending.
+    window.parent.postMessage({
+        type: "BPA_NAVIGATION_RECEIVED",
+        teklaGuid: guid
+    }, event.origin);
+
+    // Ignore duplicate messages for the same request.
+    if (bridgeNavigationGuid === guid) {
+        return;
+    }
+
+    bridgeNavigationGuid = guid;
+
+    incomingGuid = guid;
+    autoNavigationPending = true;
+
+    el("guid").value = guid;
+
+    log("Assembly GUID received from Chrome Bridge", {
+        guid
+    });
+
+    status(
+        "Assembly GUID received. Starting automatic navigation..."
+    );
+
+    try {
+        // Wait for any existing navigation to finish.
+        while (
+            connectionBusy ||
+            assemblyNavigationBusy ||
+            autoNavigationRunning
+        ) {
+            await delay(250);
+        }
+
+        // A newer drawing request may have superseded this one.
+        if (bridgeNavigationGuid !== guid) {
+            return;
+        }
+
+        if (!api) {
+            await connect();
+        } else {
+            await attemptAutoNavigation();
+        }
+
+    } catch (error) {
+        reportError(error);
+    }
+
+});
 
 // ============================================================
 // INITIALISATION
