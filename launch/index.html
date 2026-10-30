@@ -156,9 +156,51 @@ const testButton =
 
 const messagingResult =
     document.getElementById("messagingResult");
-
 let connectWindow = null;
 let handoffCompleted = false;
+
+// Stage 9D.6G.2G.24A
+let liveViewerWindow = null;
+
+window.addEventListener("message", function (event) {
+
+    if (
+        event.origin !==
+        "https://jordanf-bpa.github.io"
+    ) {
+        return;
+    }
+
+    const data = event.data;
+
+    if (!data || data.type !== "BPA_VIEWER_READY") {
+        return;
+    }
+
+    if (
+        !connectWindow ||
+        connectWindow.closed ||
+        data.projectId !== projectId
+    ) {
+        return;
+    }
+
+    liveViewerWindow = event.source;
+
+    event.source.postMessage(
+        {
+            type: "BPA_VIEWER_REGISTERED"
+        },
+        "https://jordanf-bpa.github.io"
+    );
+
+    console.log(
+        "[BPA Stage 24A] Live Trimble Connect Viewer registered."
+    );
+
+    messagingResult.textContent =
+        "Live Trimble Connect Viewer connected.";
+});
 
 // Stage 9D.6G.2G.23B
 // Receive new drawing links in the existing launcher.
