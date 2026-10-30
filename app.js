@@ -383,6 +383,127 @@ function handleProjectExplorerCommand(event, args) {
 
 
 // ============================================================
+// STAGE 9D.6G.2G.18 - LAUNCHER GUID HANDOFF
+// ============================================================
+
+let launcherRequestId = null;
+let launcherHandoffStarted = false;
+let launcherHandoffCompleted = false;
+
+function requestGuidFromLauncher() {
+
+    if (launcherHandoffStarted) {
+        return;
+    }
+
+    if (!window.top.opener) {
+        console.log(
+            "[BPA Launcher] No opener available."
+        );
+        return;
+    }
+
+    launcherHandoffStarted = true;
+
+    launcherRequestId =
+        crypto.randomUUID();
+
+    console.log(
+        "[BPA Launcher] Requesting GUID:",
+        launcherRequestId
+    );
+
+    window.top.opener.postMessage(
+        {
+            type: "BPA_GUID_REQUEST",
+            requestId: launcherRequestId
+        },
+        "https://jordanf-bpa.github.io"
+    );
+}
+
+window.addEventListener("message", async function (event) {
+
+    if (
+        event.origin !==
+        "https://jordanf-bpa.github.io"
+    ) {
+        return;
+    }
+
+    if (
+        !window.top.opener ||
+        event.source !== window.top.opener
+    ) {
+        return;
+    }
+
+    const data = event.data;
+
+    if (
+        !data ||
+        data.type !== "BPA_GUID_RESPONSE" ||
+        data.requestId !== launcherRequestId ||
+        launcherHandoffCompleted
+    ) {
+        return;
+    }
+
+    if (!validGuid(data.guid)) {
+        console.warn(
+            "[BPA Launcher] Invalid GUID received."
+        );
+        return;
+    }
+
+    launcherHandoffCompleted = true;
+
+    console.log(
+        "[BPA Launcher] GUID received:",
+        data.guid
+    );
+
+    try {
+
+        const host =
+            await api.extension.getHost();
+
+        if (host.name !== "project") {
+            return;
+        }
+
+        const project =
+            await api.project.getProject();
+
+        if (project.id !== data.projectId) {
+            throw new Error(
+                "Launcher project does not match Trimble Connect."
+            );
+        }
+
+        el("guid").value =
+            data.guid.trim().toLowerCase();
+
+        status(
+            "GUID received. Opening assembly in 3D Viewer..."
+        );
+
+        await launchPendingAssemblyInViewer();
+
+    } catch (error) {
+
+        launcherHandoffCompleted = false;
+
+        console.error(
+            "[BPA Launcher] Automatic navigation failed:",
+            error
+        );
+
+        reportError(error);
+    }
+});
+
+// ============================================================
 // STAGE 9D.6G.2G.10 - PROJECT EXPLORER HANDOFF
 // ============================================================
 
@@ -626,8 +747,32 @@ status('Connected to Trimble Connect.');
     );
   }
 
-  if (autoNavigationPending) {
+   if (autoNavigationPending) {
     await attemptAutoNavigation();
+  }
+
+  // Stage 9D.6G.2G.18
+  // Request a GUID only from Project Explorer,
+  // after the Workspace API is connected.
+
+  try {
+
+    const host =
+        await api.extension.getHost();
+
+    if (
+        host.name === "project" &&
+        !launcherHandoffStarted
+    ) {
+        requestGuidFromLauncher();
+    }
+
+  } catch (error) {
+
+    console.warn(
+        "[BPA Launcher] GUID request unavailable:",
+        error
+    );
   }
 
   // Clear only after successful automatic navigation.
