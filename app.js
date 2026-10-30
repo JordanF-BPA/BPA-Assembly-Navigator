@@ -405,23 +405,10 @@ if (models !== null) {
     populateModels(models);
 }
 
-// Attempt Project Explorer registration independently.
-// Do not use viewer availability as the context detector.
-try {
-    await registerProjectExplorerMenu();
-} catch (menuError) {
-    console.log(
-        "[BPA] Project Explorer menu unavailable in this context.",
-        menuError
-    );
+// Project Explorer menu registration is already
+// handled immediately after the Workspace API connection.
 
-    log(
-        "Project Explorer menu registration unavailable",
-        menuError?.message || String(menuError)
-    );
-}
-
-    status('Connected to Trimble Connect.');
+status('Connected to Trimble Connect.');
 
   } finally {
 
