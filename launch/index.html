@@ -64,9 +64,13 @@ p { line-height: 1.6; }
 </p>
 
 <p>
-After Trimble Connect opens, manually activate
-BPA Assembly Navigator. Automatic GUID handoff
-will be investigated in the next stage.
+<button id="testMessaging" type="button">
+    Test Launcher Messaging
+</button>
+</p>
+
+<p id="messagingResult">
+    Messaging test not started.
 </p>
 </main>
 
@@ -143,9 +147,71 @@ status.textContent =
 
 button.disabled = true;
 
-// Stage 9D.6G.1
-// Automatically open the validated Trimble Connect project.
-window.location.replace(project.href);
+// Stage 9D.6G.2G.16
+// Temporary test: keep launcher open.
+
+const testButton =
+    document.getElementById("testMessaging");
+
+const messagingResult =
+    document.getElementById("messagingResult");
+
+testButton.addEventListener("click", function () {
+
+    const targetUrl = new URL(project.href);
+
+    targetUrl.hash =
+        "teklaGuid=" + encodeURIComponent(teklaGuid);
+
+    const connectWindow = window.open(
+        targetUrl.href,
+        "_blank"
+    );
+
+    if (!connectWindow) {
+        messagingResult.textContent =
+            "Popup blocked. Allow popups and retry.";
+        return;
+    }
+
+    messagingResult.textContent =
+        "Trimble Connect opened. Waiting for reply...";
+
+    window.addEventListener("message", function (event) {
+
+        if (
+            event.origin !==
+            "https://web.connect.trimble.com"
+        ) {
+            return;
+        }
+
+        if (event.source !== connectWindow) {
+            return;
+        }
+
+        if (
+            event.data?.type ===
+            "BPA_LAUNCHER_REPLY"
+        ) {
+            messagingResult.textContent =
+                "Reply received from Trimble Connect.";
+
+            console.log(
+                "[BPA Launcher] Reply:",
+                event.data
+            );
+        }
+    });
+
+    // Expose the window reference for testing.
+    window.BPA_testConnectWindow = connectWindow;
+
+    console.log(
+        "[BPA Launcher] Opened:",
+        targetUrl.href
+    );
+});
 
 // STAGE 9D.5B.1 - STORAGE TEST
 try {
