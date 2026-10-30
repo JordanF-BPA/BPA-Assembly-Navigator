@@ -364,8 +364,26 @@ api = await window.TrimbleConnectWorkspace.connect(
     }
 
 // Stage 9D.6G.2G.1
-// Register the Project Explorer menu as soon as
-// the Workspace API connection is established.
+// Identify the actual Trimble Connect extension host.
+
+try {
+    const host = await api.extension.getHost();
+
+    console.log(
+        "[BPA Project Explorer] Host:",
+        host
+    );
+
+    log("Trimble Connect extension host", host);
+
+} catch (hostError) {
+    console.warn(
+        "[BPA Project Explorer] Host detection failed:",
+        hostError
+    );
+}
+
+// Register the Project Explorer menu.
 
 try {
     await registerProjectExplorerMenu();
