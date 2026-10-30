@@ -1716,6 +1716,93 @@ window.addEventListener("message", async (event) => {
 });
 
 // ============================================================
+// STAGE 9D.6G.2G.24A - LIVE VIEWER REGISTRATION
+// ============================================================
+
+const BPA_LAUNCHER_ORIGIN =
+    "https://jordanf-bpa.github.io";
+
+let liveViewerRegistered = false;
+
+function registerLiveViewer() {
+
+    if (liveViewerRegistered) {
+        return;
+    }
+
+    // The launcher opened the Trimble Connect tab.
+    // The embedded BPA iframe can access its opener reference.
+    if (!window.top.opener) {
+        return;
+    }
+
+    window.top.opener.postMessage(
+        {
+            type: "BPA_VIEWER_READY",
+            projectId: "l7enVCZktZA"
+        },
+        BPA_LAUNCHER_ORIGIN
+    );
+
+    console.log(
+        "[BPA Stage 24A] Viewer registration sent."
+    );
+}
+
+window.addEventListener("message", function (event) {
+
+    if (
+        event.origin !== BPA_LAUNCHER_ORIGIN ||
+        event.source !== window.top.opener
+    ) {
+        return;
+    }
+
+    const data = event.data;
+
+    if (!data || data.type !== "BPA_VIEWER_REGISTERED") {
+        return;
+    }
+
+    liveViewerRegistered = true;
+
+    console.log(
+        "[BPA Stage 24A] Live Viewer connected to launcher."
+    );
+});
+
+// Only register from the 3D Viewer.
+// Project Explorer must continue using its existing GUID handoff.
+(async function () {
+
+    try {
+        if (!api) {
+            await new Promise(resolve => {
+                const check = setInterval(() => {
+                    if (api) {
+                        clearInterval(check);
+                        resolve();
+                    }
+                }, 250);
+            });
+        }
+
+        const host = await api.extension.getHost();
+
+        if (host.name === "3dviewer") {
+            registerLiveViewer();
+        }
+
+    } catch (error) {
+        console.warn(
+            "[BPA Stage 24A] Viewer registration failed:",
+            error
+        );
+    }
+
+})();
+
+// ============================================================
 // INITIALISATION
 // ============================================================
 
