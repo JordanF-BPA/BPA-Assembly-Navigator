@@ -250,12 +250,7 @@ function populateModels(models) {
 const BPA_PROJECT_MENU = {
     title: "BPA Assembly Navigator",
     command: "BPA_NAVIGATOR",
-    subMenus: [
-        {
-            title: "Open Navigator",
-            command: "BPA_NAVIGATOR_OPEN"
-        }
-    ]
+    subMenus: []
 };
 
 let projectMenuRegistered = false;
