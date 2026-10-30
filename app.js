@@ -277,11 +277,10 @@ async function registerProjectExplorerMenu() {
         menu
     );
 
-    log("Project Explorer menu registered.");
+log("Project Explorer menu registered.");
 
-    await api.ui.setActiveMenuItem(
-        "BPA_NAVIGATOR_OPEN"
-    );
+// Do not automatically activate the submenu.
+// First verify that the navigation entry appears.
 }
 
 function handleProjectExplorerCommand(event, args) {
@@ -376,8 +375,22 @@ try {
 
 if (models !== null) {
     populateModels(models);
-} else {
+}
+
+// Attempt Project Explorer registration independently.
+// Do not use viewer availability as the context detector.
+try {
     await registerProjectExplorerMenu();
+} catch (menuError) {
+    console.log(
+        "[BPA] Project Explorer menu unavailable in this context.",
+        menuError
+    );
+
+    log(
+        "Project Explorer menu registration unavailable",
+        menuError?.message || String(menuError)
+    );
 }
 
     status('Connected to Trimble Connect.');
