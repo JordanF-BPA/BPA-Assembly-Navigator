@@ -242,6 +242,80 @@ function populateModels(models) {
   });
 }
 
+
+ // ============================================================
+ // STAGE 9D.6G.2G.1 - PROJECT EXPLORER MENU
+ // ============================================================
+
+const BPA_PROJECT_MENU = {
+    title: "BPA Assembly Navigator",
+    command: "BPA_NAVIGATOR",
+    subMenus: [
+        {
+            title: "Open Navigator",
+            command: "BPA_NAVIGATOR_OPEN"
+        }
+    ]
+};
+
+let projectMenuRegistered = false;
+
+async function registerProjectExplorerMenu() {
+
+    if (!api || projectMenuRegistered) {
+        return;
+    }
+
+    const menu = await api.ui.setMenu(
+        BPA_PROJECT_MENU
+    );
+
+    projectMenuRegistered = true;
+
+    console.log(
+        "[BPA Project Explorer] Menu registered",
+        menu
+    );
+
+    log("Project Explorer menu registered.");
+
+    await api.ui.setActiveMenuItem(
+        "BPA_NAVIGATOR_OPEN"
+    );
+}
+
+function handleProjectExplorerCommand(event, args) {
+
+    if (event !== "extension.command") {
+        return;
+    }
+
+    const command =
+        typeof args?.data === "string"
+            ? args.data
+            : args?.data?.command || "";
+
+    console.log(
+        "[BPA Project Explorer] Command received:",
+        command
+    );
+
+    if (
+        command === "BPA_NAVIGATOR" ||
+        command.startsWith("BPA_NAVIGATOR_OPEN")
+    ) {
+        log(
+            "Project Explorer command received",
+            command
+        );
+
+        status(
+            "BPA Navigator opened from Project Explorer."
+        );
+    }
+}
+
+
 // ============================================================
 // CONNECT TO TRIMBLE CONNECT
 // ============================================================
@@ -269,11 +343,13 @@ async function connect() {
 
     if (!api) {
 
-      api = await window.TrimbleConnectWorkspace.connect(
-        window.parent,
-        () => {},
-        30000
-      );
+api = await window.TrimbleConnectWorkspace.connect(
+    window.parent,
+    (event, args) => {
+        handleProjectExplorerCommand(event, args);
+    },
+    30000
+);
     }
 
     const project =
@@ -284,10 +360,25 @@ async function connect() {
       projectName: project?.name
     });
 
-    const models =
-      await api.viewer.getModels();
+// Project Explorer and 3D Viewer provide different
+// capabilities. Try viewer functionality first.
 
+let models = null;
+
+try {
+    models = await api.viewer.getModels();
+} catch (viewerError) {
+    console.log(
+        "[BPA] Viewer API unavailable in this context.",
+        viewerError
+    );
+}
+
+if (models !== null) {
     populateModels(models);
+} else {
+    await registerProjectExplorerMenu();
+}
 
     status('Connected to Trimble Connect.');
 
@@ -1235,6 +1326,14 @@ window.addEventListener("message", async (event) => {
 // ============================================================
 
 updateButtons();
+
+// Stage 9D.6G.2G.1
+// Establish the connection on startup so a Project
+// Explorer extension can register its navigation menu.
+
+if (!incomingGuid) {
+    run(connect)();
+}
 
 if (incomingGuid) {
 
