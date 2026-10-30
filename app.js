@@ -481,6 +481,16 @@ async function connect() {
 api = await window.TrimbleConnectWorkspace.connect(
     window.parent,
     (event, args) => {
+
+        // Stage 9D.6G.2G.12F
+        // Diagnostic only — do not trigger assembly navigation.
+        if (event === "extension.broadcast") {
+            console.log(
+                "[BPA BROADCAST TEST] Message received:",
+                args?.data
+            );
+        }
+
         handleProjectExplorerCommand(event, args);
     },
     30000
