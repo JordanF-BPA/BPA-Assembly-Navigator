@@ -270,12 +270,24 @@ async function registerProjectExplorerMenu() {
         BPA_PROJECT_MENU
     );
 
-    projectMenuRegistered = true;
+console.log(
+    "[BPA Project Explorer] setMenu result:",
+    menu
+);
 
-    console.log(
-        "[BPA Project Explorer] Menu registered",
-        menu
+if (menu === false || menu == null) {
+    projectMenuRegistered = false;
+
+    throw new Error(
+        "Trimble Connect did not accept the Project Explorer menu."
     );
+}
+
+projectMenuRegistered = true;
+
+console.log(
+    "[BPA Project Explorer] Menu registered successfully."
+);
 
 log("Project Explorer menu registered.");
 
