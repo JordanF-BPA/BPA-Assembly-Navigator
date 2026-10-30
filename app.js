@@ -351,13 +351,41 @@ api = await window.TrimbleConnectWorkspace.connect(
 );
     }
 
+// Stage 9D.6G.2G.1
+// Register the Project Explorer menu as soon as
+// the Workspace API connection is established.
+
+try {
+    await registerProjectExplorerMenu();
+} catch (menuError) {
+    console.warn(
+        "[BPA Project Explorer] Menu registration failed:",
+        menuError
+    );
+
+    log(
+        "Project Explorer menu registration failed",
+        menuError?.message || String(menuError)
+    );
+}
+
+// Retrieve project details independently.
+// Failure must not prevent the extension from loading.
+
+try {
     const project =
-      await api.project.getProject();
+        await api.project.getProject();
 
     log('Connected to Trimble Connect', {
-      projectId: project?.id,
-      projectName: project?.name
+        projectId: project?.id,
+        projectName: project?.name
     });
+} catch (projectError) {
+    console.warn(
+        "[BPA] Project information unavailable:",
+        projectError
+    );
+}
 
 // Project Explorer and 3D Viewer provide different
 // capabilities. Try viewer functionality first.
