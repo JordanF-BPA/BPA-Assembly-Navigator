@@ -249,6 +249,7 @@ function populateModels(models) {
 
 const BPA_PROJECT_MENU = {
     title: "BPA Assembly Navigator",
+    icon: "https://jordanf-bpa.github.io/favicon.ico",
     command: "BPA_NAVIGATOR",
     subMenus: []
 };
