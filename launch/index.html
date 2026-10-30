@@ -80,8 +80,8 @@ p { line-height: 1.6; }
 
     const params = new URLSearchParams(location.search);
 
-    const teklaGuid = params.get("teklaGuid") || "";
-    const ifcGuid = params.get("ifcGuid") || "";
+let teklaGuid = params.get("teklaGuid") || "";
+let ifcGuid = params.get("ifcGuid") || "";
 const projectKey = params.get("projectKey") || "";
 
 const projects = {
@@ -159,6 +159,59 @@ const messagingResult =
 
 let connectWindow = null;
 let handoffCompleted = false;
+
+// Stage 9D.6G.2G.23B
+// Receive new drawing links in the existing launcher.
+const reuseChannel = new BroadcastChannel(
+    "BPA_ASSEMBLY_NAVIGATOR_REUSE"
+);
+
+reuseChannel.addEventListener("message", function (event) {
+    const data = event.data;
+
+    if (!data || data.type !== "BPA_REUSE_REQUEST") {
+        return;
+    }
+
+    if (
+        !guidPattern.test(data.teklaGuid) ||
+        !ifcPattern.test(data.ifcGuid) ||
+        data.projectKey !== projectKey
+    ) {
+        return;
+    }
+
+    // Only an established launcher with an accessible
+    // Trimble Connect window should accept the request.
+    if (!connectWindow || connectWindow.closed) {
+        return;
+    }
+
+    teklaGuid = data.teklaGuid;
+    ifcGuid = data.ifcGuid;
+    handoffCompleted = false;
+
+    document.getElementById("assembly").textContent =
+        teklaGuid;
+
+    document.getElementById("ifc").textContent =
+        ifcGuid;
+
+    status.textContent =
+        "New assembly received. Reopening BPA Navigator...";
+
+    // Tell the new short-link page that this launcher
+    // has accepted the assembly.
+    reuseChannel.postMessage({
+        type: "BPA_REUSE_ACCEPTED",
+        requestId: data.requestId
+    });
+
+    // Reuse the existing Connect window and trigger
+    // the already-working Project Explorer GUID handoff.
+    connectWindow.location.href = projectExplorerUrl.href;
+    connectWindow.focus();
+});
 
 const projectId =
     project.pathname.match(/^\/projects\/([^/]+)/)?.[1];
