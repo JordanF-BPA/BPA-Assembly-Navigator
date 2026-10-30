@@ -93,6 +93,60 @@ let incomingGuid = rawIncomingGuid
 let autoNavigationPending = validGuid(incomingGuid);
 let autoNavigationRunning = false;
 
+// Stage 9D.6G.2G.10
+const BPA_PENDING_NAVIGATION_KEY =
+    "BPA_PENDING_ASSEMBLY_NAVIGATION";
+
+const BPA_PENDING_MAX_AGE_MS = 5 * 60 * 1000;
+
+function savePendingNavigation(guid, projectId, modelId) {
+    if (!validGuid(guid)) {
+        throw new Error("Invalid assembly GUID.");
+    }
+
+    localStorage.setItem(
+        BPA_PENDING_NAVIGATION_KEY,
+        JSON.stringify({
+            guid: guid.toLowerCase(),
+            projectId,
+            modelId,
+            createdAt: Date.now()
+        })
+    );
+}
+
+function readPendingNavigation() {
+    const raw = localStorage.getItem(
+        BPA_PENDING_NAVIGATION_KEY
+    );
+
+    if (!raw) return null;
+
+    try {
+        const request = JSON.parse(raw);
+
+        if (
+            !validGuid(request.guid) ||
+            !Number.isFinite(request.createdAt) ||
+            Date.now() - request.createdAt >
+                BPA_PENDING_MAX_AGE_MS ||
+            request.createdAt > Date.now()
+        ) {
+            return null;
+        }
+
+        return request;
+    } catch (_) {
+        return null;
+    }
+}
+
+function clearPendingNavigation() {
+    localStorage.removeItem(
+        BPA_PENDING_NAVIGATION_KEY
+    );
+}
+
 // ============================================================
 // STATUS AND ACTIVITY LOG
 // ============================================================
@@ -329,6 +383,75 @@ function handleProjectExplorerCommand(event, args) {
 
 
 // ============================================================
+// STAGE 9D.6G.2G.10 - PROJECT EXPLORER HANDOFF
+// ============================================================
+
+async function launchPendingAssemblyInViewer() {
+
+    if (!api) {
+        await connect();
+    }
+
+    const host = await api.extension.getHost();
+
+    if (host.name !== "project") {
+        throw new Error(
+            "Launch this operation from Project Explorer."
+        );
+    }
+
+    const guid = el("guid").value
+        .trim()
+        .toLowerCase();
+
+    if (!validGuid(guid)) {
+        throw new Error(
+            "Enter a valid Tekla assembly GUID."
+        );
+    }
+
+    const project = await api.project.getProject();
+
+    // Stage test: use the model ID confirmed in
+    // your existing Trimble Connect project.
+    const modelId = "LPDL2Rmxp1E";
+
+    if (project.id !== "l7enVCZktZA") {
+        throw new Error(
+            "This stage is currently configured for the test project only."
+        );
+    }
+
+    savePendingNavigation(
+        guid,
+        project.id,
+        modelId
+    );
+
+    log("Pending assembly navigation saved", {
+        guid,
+        projectId: project.id,
+        modelId
+    });
+
+    status("Opening 3D Viewer...");
+
+    const result = await api.extension.goTo(
+        "3dviewer",
+        {
+            projectId: project.id,
+            modelId
+        }
+    );
+
+    if (result === false) {
+        throw new Error(
+            "Trimble Connect rejected 3D Viewer navigation."
+        );
+    }
+}
+
+// ============================================================
 // CONNECT TO TRIMBLE CONNECT
 // ============================================================
 
@@ -452,8 +575,60 @@ status('Connected to Trimble Connect.');
     updateButtons();
   }
 
+  // Stage 9D.6G.2G.10
+  // Process a pending Project Explorer request
+  // only when running inside the 3D Viewer.
+
+  try {
+    const host = await api.extension.getHost();
+
+    if (host.name === "3dviewer") {
+
+      const pending = readPendingNavigation();
+
+      if (pending) {
+
+        const project =
+          await api.project.getProject();
+
+        if (pending.projectId === project.id) {
+
+          incomingGuid = pending.guid;
+          autoNavigationPending = true;
+
+          el("guid").value = pending.guid;
+
+          log("Pending GUID retrieved from Project Explorer", {
+            guid: pending.guid,
+            modelId: pending.modelId
+          });
+
+          status(
+            "Pending assembly GUID received. Locating assembly..."
+          );
+        }
+      }
+    }
+  } catch (error) {
+    log(
+      "Pending navigation retrieval failed",
+      error.message
+    );
+  }
+
   if (autoNavigationPending) {
     await attemptAutoNavigation();
+  }
+
+  // Clear only after successful automatic navigation.
+  if (
+    !autoNavigationPending &&
+    readPendingNavigation()?.guid === incomingGuid &&
+    fullTransparencyActive
+  ) {
+    clearPendingNavigation();
+
+    log("Pending assembly navigation completed and cleared.");
   }
 }
 
