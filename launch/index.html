@@ -65,7 +65,7 @@ p { line-height: 1.6; }
 
 <p>
 <button id="testMessaging" type="button">
-    Open BPA Navigator in Trimble Connect
+    Open Trimble Connect
 </button>
 </p>
 
@@ -230,11 +230,15 @@ window.addEventListener("message", function (event) {
         "GUID transferred. Trimble Connect is opening the assembly.";
 });
 
-testButton.addEventListener("click", function () {
+// ============================================================
+// STAGE 9D.6G.2G.20 - AUTOMATIC TRIMBLE CONNECT LAUNCH
+// ============================================================
+
+function openTrimbleConnect() {
 
     if (connectWindow && !connectWindow.closed) {
         connectWindow.focus();
-        return;
+        return true;
     }
 
     handoffCompleted = false;
@@ -246,8 +250,13 @@ testButton.addEventListener("click", function () {
 
     if (!connectWindow) {
         messagingResult.textContent =
-            "Chrome blocked the new tab. Allow popups and retry.";
-        return;
+            "Automatic opening was blocked. " +
+            "Click the button to open Trimble Connect.";
+
+        testButton.disabled = false;
+        testButton.style.display = "";
+
+        return false;
     }
 
     messagingResult.textContent =
@@ -257,8 +266,26 @@ testButton.addEventListener("click", function () {
         "[BPA Launcher] Project Explorer opened:",
         projectExplorerUrl.href
     );
-});
 
+    testButton.style.display = "none";
+
+    return true;
+}
+
+// Keep the existing button as a fallback.
+testButton.addEventListener("click", openTrimbleConnect);
+
+// Attempt automatic opening once the launcher is ready.
+if (
+    teklaGuid &&
+    projectId &&
+    projectExplorerUrl
+) {
+    messagingResult.textContent =
+        "Automatically opening Trimble Connect...";
+
+    openTrimbleConnect();
+}
 // STAGE 9D.5B.1 - STORAGE TEST
 try {
     localStorage.setItem(
