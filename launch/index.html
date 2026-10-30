@@ -159,8 +159,77 @@ const messagingResult =
 let connectWindow = null;
 let handoffCompleted = false;
 
-// Stage 9D.6G.2G.24A
+// Stage 9D.6G.2G.24A / 24B
 let liveViewerWindow = null;
+let liveRequestCounter = 0;
+let liveRequestTimer = null;
+let pendingLiveRequestId = null;
+
+function reloadTrimbleConnect() {
+    clearTimeout(liveRequestTimer);
+    liveRequestTimer = null;
+    pendingLiveRequestId = null;
+
+    liveViewerWindow = null;
+    handoffCompleted = false;
+
+    if (!connectWindow || connectWindow.closed) {
+        openTrimbleConnect();
+        return;
+    }
+
+    connectWindow.location.href = projectExplorerUrl.href;
+    connectWindow.focus();
+}
+
+function sendLiveNavigation() {
+    if (!liveViewerWindow) {
+        reloadTrimbleConnect();
+        return;
+    }
+
+    const requestId = "BPA_LIVE_" + (++liveRequestCounter);
+
+    pendingLiveRequestId = requestId;
+
+    clearTimeout(liveRequestTimer);
+
+    try {
+        liveViewerWindow.postMessage(
+            {
+                type: "BPA_LIVE_NAVIGATE",
+                requestId,
+                guid: teklaGuid,
+                projectId,
+                modelId: project.searchParams.get("modelId")
+            },
+            "https://jordanf-bpa.github.io"
+        );
+
+        status.textContent =
+            "Sending assembly to the existing 3D Viewer...";
+
+        // Fallback only if the Viewer does not acknowledge receipt.
+        liveRequestTimer = setTimeout(function () {
+            if (pendingLiveRequestId !== requestId) {
+                return;
+            }
+
+            pendingLiveRequestId = null;
+
+            console.warn(
+                "[BPA Stage 24B] Viewer did not respond. Reloading."
+            );
+
+            reloadTrimbleConnect();
+        }, 5000);
+
+    } catch (error) {
+        console.error("[BPA Stage 24B]", error);
+        pendingLiveRequestId = null;
+        reloadTrimbleConnect();
+    }
+}
 
 window.addEventListener("message", function (event) {
 
@@ -201,6 +270,45 @@ window.addEventListener("message", function (event) {
     messagingResult.textContent =
         "Live Trimble Connect Viewer connected.";
 });
+
+// ============================================================
+// STAGE 9D.6G.2G.24B - LIVE NAVIGATION ACKNOWLEDGEMENT
+// ============================================================
+
+window.addEventListener("message", function (event) {
+
+    if (
+        event.origin !== "https://jordanf-bpa.github.io" ||
+        event.source !== liveViewerWindow
+    ) {
+        return;
+    }
+
+    const data = event.data;
+
+    if (
+        !data ||
+        data.type !== "BPA_LIVE_NAVIGATE_ACK" ||
+        data.requestId !== pendingLiveRequestId
+    ) {
+        return;
+    }
+
+      clearTimeout(liveRequestTimer);
+    liveRequestTimer = null;
+    pendingLiveRequestId = null;
+
+    status.textContent =
+        "Assembly received by the live 3D Viewer.";
+
+    messagingResult.textContent =
+        "Live navigation request accepted. No page reload.";
+
+    console.log(
+        "[BPA Stage 24B] Live request acknowledged:",
+        data.requestId
+    );
+});    
 
 // Stage 9D.6G.2G.23B
 // Receive new drawing links in the existing launcher.
@@ -249,10 +357,14 @@ reuseChannel.addEventListener("message", function (event) {
         requestId: data.requestId
     });
 
-    // Reuse the existing Connect window and trigger
-    // the already-working Project Explorer GUID handoff.
-    connectWindow.location.href = projectExplorerUrl.href;
-    connectWindow.focus();
+    // Stage 24B:
+    // Send directly to the existing Viewer when available.
+    // Otherwise use the working Project Explorer fallback.
+    if (liveViewerWindow) {
+        sendLiveNavigation();
+    } else {
+        reloadTrimbleConnect();
+    }
 });
 
 const projectId =
