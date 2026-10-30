@@ -266,9 +266,14 @@ async function registerProjectExplorerMenu() {
         return;
     }
 
-    const menu = await api.ui.setMenu(
-        BPA_PROJECT_MENU
-    );
+ console.log(
+    "[BPA Project Explorer] Menu request:",
+    JSON.stringify(BPA_PROJECT_MENU, null, 2)
+);
+
+const menu = await api.ui.setMenu(
+    BPA_PROJECT_MENU
+);
 
 console.log(
     "[BPA Project Explorer] setMenu result:",
@@ -369,10 +374,15 @@ api = await window.TrimbleConnectWorkspace.connect(
 try {
     const host = await api.extension.getHost();
 
-    console.log(
-        "[BPA Project Explorer] Host:",
-        host
-    );
+  console.log(
+    "[BPA Project Explorer] Host details:",
+    JSON.stringify(host, null, 2)
+);
+
+console.log(
+    "[BPA Project Explorer] Host raw object:",
+    host
+);
 
     log("Trimble Connect extension host", host);
 
