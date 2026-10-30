@@ -1724,6 +1724,131 @@ const BPA_LAUNCHER_ORIGIN =
 
 let liveViewerRegistered = false;
 
+// ============================================================
+// STAGE 9D.6G.2G.24B - LIVE ASSEMBLY NAVIGATION
+// ============================================================
+
+let latestLiveRequest = null;
+let liveNavigationProcessing = false;
+
+async function processLiveNavigation() {
+
+    if (liveNavigationProcessing) {
+        return;
+    }
+
+    liveNavigationProcessing = true;
+
+    try {
+        while (latestLiveRequest) {
+
+            // Wait until any earlier navigation finishes.
+            while (
+                connectionBusy ||
+                assemblyNavigationBusy ||
+                autoNavigationRunning ||
+                fullTransparencyBusy
+            ) {
+                await delay(200);
+            }
+
+            const request = latestLiveRequest;
+            latestLiveRequest = null;
+
+            incomingGuid = request.guid;
+            autoNavigationPending = true;
+
+            el("guid").value = request.guid;
+
+            if (request.modelId) {
+                const modelSelect = el("model");
+
+                const optionExists = Array.from(
+                    modelSelect.options
+                ).some(option =>
+                    option.value === request.modelId
+                );
+
+                if (optionExists) {
+                    modelSelect.value = request.modelId;
+                }
+            }
+
+            console.log(
+                "[BPA Stage 24B] Navigating to:",
+                request.guid
+            );
+
+            await attemptAutoNavigation();
+        }
+
+    } catch (error) {
+        console.error(
+            "[BPA Stage 24B] Live navigation failed:",
+            error
+        );
+
+        reportError(error);
+
+    } finally {
+        liveNavigationProcessing = false;
+
+        // Handle requests received while finishing.
+        if (latestLiveRequest) {
+            processLiveNavigation();
+        }
+    }
+}
+
+window.addEventListener("message", function (event) {
+
+    if (
+        event.origin !== BPA_LAUNCHER_ORIGIN ||
+        event.source !== window.top.opener ||
+        !liveViewerRegistered
+    ) {
+        return;
+    }
+
+    const data = event.data;
+
+    if (
+        !data ||
+        data.type !== "BPA_LIVE_NAVIGATE" ||
+        typeof data.requestId !== "string" ||
+        !data.requestId ||
+        !validGuid(data.guid)
+    ) {
+        return;
+    }
+
+    // Only accept requests for the current project.
+    if (data.projectId !== "l7enVCZktZA") {
+        return;
+    }
+
+    latestLiveRequest = {
+        guid: data.guid.toLowerCase(),
+        modelId: data.modelId
+    };
+
+    // Acknowledge receipt before starting navigation.
+    event.source.postMessage(
+        {
+            type: "BPA_LIVE_NAVIGATE_ACK",
+            requestId: data.requestId
+        },
+        BPA_LAUNCHER_ORIGIN
+    );
+
+    console.log(
+        "[BPA Stage 24B] New live GUID received:",
+        data.guid
+    );
+
+    processLiveNavigation();
+});
+
 function registerLiveViewer() {
 
     if (liveViewerRegistered) {
