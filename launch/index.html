@@ -243,10 +243,10 @@ function openTrimbleConnect() {
 
     handoffCompleted = false;
 
-    connectWindow = window.open(
-        projectExplorerUrl.href,
-        "_blank"
-    );
+connectWindow = window.open(
+    projectExplorerUrl.href,
+    "BPA_TRIMBLE_CONNECT"
+);
 
     if (!connectWindow) {
         messagingResult.textContent =
