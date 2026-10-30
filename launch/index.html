@@ -65,7 +65,7 @@ p { line-height: 1.6; }
 
 <p>
 <button id="testMessaging" type="button">
-    Test Launcher Messaging
+    Open BPA Navigator in Trimble Connect
 </button>
 </p>
 
@@ -147,8 +147,9 @@ status.textContent =
 
 button.disabled = true;
 
-// Stage 9D.6G.2G.16
-// Temporary test: keep launcher open.
+// ============================================================
+// STAGE 9D.6G.2G.18 - DIRECT LAUNCHER HANDOFF
+// ============================================================
 
 const testButton =
     document.getElementById("testMessaging");
@@ -156,60 +157,105 @@ const testButton =
 const messagingResult =
     document.getElementById("messagingResult");
 
+let connectWindow = null;
+let handoffCompleted = false;
+
+const projectId =
+    project.pathname.match(/^\/projects\/([^/]+)/)?.[1];
+
+const projectExplorerUrl = new URL(
+    "https://web.connect.trimble.com/projects/" +
+    encodeURIComponent(projectId) +
+    "/extension/" +
+    "8a723075-30c4-8dca-6d25-bf77346a67e0/" +
+    "BPA_NAVIGATOR"
+);
+
+// Listen before opening Trimble Connect.
+window.addEventListener("message", function (event) {
+
+    if (
+        event.origin !==
+        "https://jordanf-bpa.github.io"
+    ) {
+        return;
+    }
+
+    const data = event.data;
+
+    if (
+        !data ||
+        data.type !== "BPA_GUID_REQUEST" ||
+        typeof data.requestId !== "string" ||
+        !data.requestId
+    ) {
+        return;
+    }
+
+    if (!connectWindow || connectWindow.closed) {
+        return;
+    }
+
+    if (handoffCompleted) {
+        return;
+    }
+
+    // Respond to the requesting BPA iframe.
+    if (!event.source) {
+        return;
+    }
+
+    console.log(
+        "[BPA Launcher] GUID requested:",
+        data.requestId
+    );
+
+    event.source.postMessage(
+        {
+            type: "BPA_GUID_RESPONSE",
+            requestId: data.requestId,
+            guid: teklaGuid,
+            projectId,
+            modelId: project.searchParams.get("modelId")
+        },
+        "https://jordanf-bpa.github.io"
+    );
+
+    handoffCompleted = true;
+
+    messagingResult.textContent =
+        "Assembly GUID sent to BPA Navigator.";
+
+    status.textContent =
+        "GUID transferred. Trimble Connect is opening the assembly.";
+});
+
 testButton.addEventListener("click", function () {
 
-    const targetUrl = new URL(project.href);
+    if (connectWindow && !connectWindow.closed) {
+        connectWindow.focus();
+        return;
+    }
 
-    targetUrl.hash =
-        "teklaGuid=" + encodeURIComponent(teklaGuid);
+    handoffCompleted = false;
 
-    const connectWindow = window.open(
-        targetUrl.href,
+    connectWindow = window.open(
+        projectExplorerUrl.href,
         "_blank"
     );
 
     if (!connectWindow) {
         messagingResult.textContent =
-            "Popup blocked. Allow popups and retry.";
+            "Chrome blocked the new tab. Allow popups and retry.";
         return;
     }
 
     messagingResult.textContent =
-        "Trimble Connect opened. Waiting for reply...";
-
-    window.addEventListener("message", function (event) {
-
-        if (
-            event.origin !==
-            "https://web.connect.trimble.com"
-        ) {
-            return;
-        }
-
-        if (event.source !== connectWindow) {
-            return;
-        }
-
-        if (
-            event.data?.type ===
-            "BPA_LAUNCHER_REPLY"
-        ) {
-            messagingResult.textContent =
-                "Reply received from Trimble Connect.";
-
-            console.log(
-                "[BPA Launcher] Reply:",
-                event.data
-            );
-        }
-    });
-
-    // Expose the window reference for testing.
-    window.BPA_testConnectWindow = connectWindow;
+        "Trimble Connect opened. Waiting for BPA Navigator...";
 
     console.log(
-        "[BPA Launcher] Opened:",
-        targetUrl.href
+        "[BPA Launcher] Project Explorer opened:",
+        projectExplorerUrl.href
     );
 });
 
