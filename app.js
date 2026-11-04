@@ -882,6 +882,7 @@ async function resolveAssembly(modelId, guid) {
     const group = groups.find(item => item.modelId === modelId);
     const candidates = [...new Set((group?.objects || []).map(object => object.id))];
     const matches = new Set();
+    const provisional = new Set();
     for (let start = 0; start < candidates.length; start += 100) {
       const objects = await api.viewer.getObjectProperties(modelId, candidates.slice(start, start + 100));
       for (const object of objects) {
@@ -889,7 +890,12 @@ async function resolveAssembly(modelId, guid) {
         const marks = properties.filter(property => property.name === "Assembly/Cast unit Mark");
         const fields = marks.length ? marks : properties.filter(property => property.name === "Tag");
         if (fields.some(property => property.value === mark)) matches.add(object.id);
+        else if (fields.some(property => property.value === mark + "(?)")) provisional.add(object.id);
       }
+    }
+    // Tekla can export a position with a trailing (?) on an assembly root.
+    if (matches.size < expected && matches.size + provisional.size === expected) {
+      for (const id of provisional) matches.add(id);
     }
     if (matches.size !== expected) {
       throw new Error("Expected " + expected + " assemblies marked " + mark + ", found " + matches.size + ".");
