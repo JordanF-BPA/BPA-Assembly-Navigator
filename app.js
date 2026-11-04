@@ -52,6 +52,8 @@ try {
 let api = null;
 let assemblyNavigationBusy = false;
 let connectionBusy = false;
+let navigationModelId = null;
+let viewerProjectId = null;
 
 let fullTransparencyBusy = false;
 let fullTransparencyActive = false;
@@ -490,7 +492,7 @@ window.addEventListener("message", async function (event) {
             "GUID received. Opening assembly in 3D Viewer..."
         );
 
-        await launchPendingAssemblyInViewer();
+        await launchPendingAssemblyInViewer(data.projectId, data.modelId);
 
     } catch (error) {
 
@@ -509,7 +511,7 @@ window.addEventListener("message", async function (event) {
 // STAGE 9D.6G.2G.10 - PROJECT EXPLORER HANDOFF
 // ============================================================
 
-async function launchPendingAssemblyInViewer() {
+async function launchPendingAssemblyInViewer(projectId, modelId) {
 
     if (!api) {
         await connect();
@@ -535,14 +537,8 @@ async function launchPendingAssemblyInViewer() {
 
     const project = await api.project.getProject();
 
-    // Stage test: use the model ID confirmed in
-    // your existing Trimble Connect project.
-    const modelId = "LPDL2Rmxp1E";
-
-    if (project.id !== "l7enVCZktZA") {
-        throw new Error(
-            "This stage is currently configured for the test project only."
-        );
+    if (project.id !== projectId || typeof modelId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(modelId)) {
+        throw new Error("The requested project or published model is invalid.");
     }
 
     savePendingNavigation(
@@ -726,6 +722,7 @@ status('Connected to Trimble Connect.');
 
         if (pending.projectId === project.id) {
 
+          navigationModelId = pending.modelId;
           incomingGuid = pending.guid;
           autoNavigationPending = true;
 
@@ -1450,6 +1447,10 @@ async function attemptAutoNavigation() {
           await api.viewer.getModels();
 
         populateModels(models);
+        if (navigationModelId) {
+          el('model').value = navigationModelId;
+          if (!el('model').value) throw new Error("The requested Connect model is not loaded: " + navigationModelId);
+        }
 
         if (!el('model').value) {
           throw new Error(
@@ -1781,6 +1782,7 @@ async function processLiveNavigation() {
             const request = latestLiveRequest;
             latestLiveRequest = null;
 
+            navigationModelId = request.modelId;
             incomingGuid = request.guid;
             autoNavigationPending = true;
 
@@ -1849,7 +1851,7 @@ window.addEventListener("message", function (event) {
     }
 
     // Only accept requests for the current project.
-    if (data.projectId !== "l7enVCZktZA") {
+    if (data.projectId !== viewerProjectId) {
         return;
     }
 
@@ -1890,7 +1892,7 @@ function registerLiveViewer() {
     window.top.opener.postMessage(
         {
             type: "BPA_VIEWER_READY",
-            projectId: "l7enVCZktZA"
+            projectId: viewerProjectId
         },
         BPA_LAUNCHER_ORIGIN
     );
@@ -1941,6 +1943,7 @@ window.addEventListener("message", function (event) {
         const host = await api.extension.getHost();
 
         if (host.name === "3dviewer") {
+            viewerProjectId = (await api.project.getProject()).id;
             registerLiveViewer();
         }
 

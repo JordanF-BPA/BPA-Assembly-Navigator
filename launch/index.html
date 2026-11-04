@@ -89,7 +89,14 @@ const projects = {
         "https://web.connect.trimble.com/projects/l7enVCZktZA/viewer/3d/?modelId=LPDL2Rmxp1E"
 };
 
-const projectUrl = projects[projectKey] || "";
+const scoped = params.has("j") || params.has("m");
+const projectIdParam = params.get("j") || "";
+const modelIdParam = params.get("m") || "";
+const safeId = /^[A-Za-z0-9_-]{1,64}$/;
+const projectUrl = scoped
+    ? (safeId.test(projectIdParam) && safeId.test(modelIdParam)
+        ? "https://web.connect.trimble.com/projects/" + projectIdParam + "/viewer/3d/?modelId=" + modelIdParam : "")
+    : projects[projectKey] || "";
 
     const status = document.getElementById("status");
     const button = document.getElementById("open");
@@ -330,7 +337,7 @@ const reuseChannel = new BroadcastChannel(
 reuseChannel.addEventListener("message", function (event) {
     const data = event.data;
 
-    if (!data || data.type !== "BPA_REUSE_REQUEST") {
+    if (scoped || !data || data.type !== "BPA_REUSE_REQUEST") {
         return;
     }
 
