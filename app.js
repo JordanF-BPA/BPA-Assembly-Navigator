@@ -871,6 +871,10 @@ function fullTransparencyParentIds(parents) {
 // RESOLVE TEKLA ASSEMBLY GUID
 // ============================================================
 
+function normalizePosition(value) {
+  return typeof value === "string" ? value.normalize("NFKC").trim().replace(/\s*\(\s*\?\s*\)$/, "").trim() : "";
+}
+
 async function resolveAssembly(modelId, guid) {
 
   const position = positionTarget.exec(guid);
@@ -879,26 +883,21 @@ async function resolveAssembly(modelId, guid) {
     const mark = new TextDecoder("utf-8", {fatal: true}).decode(bytes);
     const expected = Number(position[2]);
     const groups = await api.viewer.getObjects({parameter: {class: "IFCELEMENTASSEMBLY"}});
-    const group = groups.find(item => item.modelId === modelId);
-    const candidates = [...new Set((group?.objects || []).map(object => object.id))];
+    const modelGroups = groups.filter(item => item.modelId === modelId);
+    const candidates = [...new Set(modelGroups.flatMap(group => group.objects || []).map(object => object.id))];
     const matches = new Set();
-    const provisional = new Set();
+    const wanted = normalizePosition(mark);
     for (let start = 0; start < candidates.length; start += 100) {
       const objects = await api.viewer.getObjectProperties(modelId, candidates.slice(start, start + 100));
       for (const object of objects) {
         const properties = (object.properties || []).flatMap(set => set.properties || []);
-        const marks = properties.filter(property => property.name === "Assembly/Cast unit Mark");
+        const marks = properties.filter(property => property.name?.trim().toLowerCase() === "assembly/cast unit mark");
         const fields = marks.length ? marks : properties.filter(property => property.name === "Tag");
-        if (fields.some(property => property.value === mark)) matches.add(object.id);
-        else if (fields.some(property => property.value === mark + "(?)")) provisional.add(object.id);
+        if (wanted && fields.some(property => normalizePosition(property.value) === wanted)) matches.add(object.id);
       }
     }
-    // Tekla can export a position with a trailing (?) on an assembly root.
-    if (matches.size < expected && matches.size + provisional.size === expected) {
-      for (const id of provisional) matches.add(id);
-    }
     if (matches.size !== expected) {
-      throw new Error("Expected " + expected + " assemblies marked " + mark + ", found " + matches.size + ".");
+      throw new Error("Expected " + expected + " assemblies marked " + mark + ", found " + matches.size + " after ignoring (?).");
     }
     const rootIds = [...matches];
     return {modelId, guid, rootIds, selector: createObjectSelector(modelId, rootIds, true)};
