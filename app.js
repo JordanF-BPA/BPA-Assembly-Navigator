@@ -67,6 +67,8 @@ const AUTO_NAVIGATION_RETRY_DELAY = 2000;
 
 const el = id => document.getElementById(id);
 
+const positionTarget = /^pos-((?:[0-9a-f]{2}){1,316})-([1-9]\d{0,8})$/;
+const validTarget = value => positionTarget.test(value) || validGuid(value);
 const validGuid = value =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -90,7 +92,7 @@ let incomingGuid = rawIncomingGuid
   .trim()
   .toLowerCase();
 
-let autoNavigationPending = validGuid(incomingGuid);
+let autoNavigationPending = validTarget(incomingGuid);
 let autoNavigationRunning = false;
 
 // Stage 9D.6G.2G.10
@@ -100,7 +102,7 @@ const BPA_PENDING_NAVIGATION_KEY =
 const BPA_PENDING_MAX_AGE_MS = 5 * 60 * 1000;
 
 function savePendingNavigation(guid, projectId, modelId) {
-    if (!validGuid(guid)) {
+    if (!validTarget(guid)) {
         throw new Error("Invalid assembly GUID.");
     }
 
@@ -126,7 +128,7 @@ function readPendingNavigation() {
         const request = JSON.parse(raw);
 
         if (
-            !validGuid(request.guid) ||
+            !validTarget(request.guid) ||
             !Number.isFinite(request.createdAt) ||
             Date.now() - request.createdAt >
                 BPA_PENDING_MAX_AGE_MS ||
@@ -449,7 +451,7 @@ window.addEventListener("message", async function (event) {
         return;
     }
 
-    if (!validGuid(data.guid)) {
+    if (!validTarget(data.guid)) {
         console.warn(
             "[BPA Launcher] Invalid GUID received."
         );
@@ -525,7 +527,7 @@ async function launchPendingAssemblyInViewer() {
         .trim()
         .toLowerCase();
 
-    if (!validGuid(guid)) {
+    if (!validTarget(guid)) {
         throw new Error(
             "Enter a valid Tekla assembly GUID."
         );
@@ -871,6 +873,31 @@ function fullTransparencyParentIds(parents) {
 
 async function resolveAssembly(modelId, guid) {
 
+  const position = positionTarget.exec(guid);
+  if (position) {
+    const bytes = Uint8Array.from(position[1].match(/../g), pair => parseInt(pair, 16));
+    const mark = new TextDecoder("utf-8", {fatal: true}).decode(bytes);
+    const expected = Number(position[2]);
+    const groups = await api.viewer.getObjects({parameter: {class: "IFCELEMENTASSEMBLY"}});
+    const group = groups.find(item => item.modelId === modelId);
+    const candidates = [...new Set((group?.objects || []).map(object => object.id))];
+    const matches = new Set();
+    for (let start = 0; start < candidates.length; start += 100) {
+      const objects = await api.viewer.getObjectProperties(modelId, candidates.slice(start, start + 100));
+      for (const object of objects) {
+        const properties = (object.properties || []).flatMap(set => set.properties || []);
+        const marks = properties.filter(property => property.name === "Assembly/Cast unit Mark");
+        const fields = marks.length ? marks : properties.filter(property => property.name === "Tag");
+        if (fields.some(property => property.value === mark)) matches.add(object.id);
+      }
+    }
+    if (matches.size !== expected) {
+      throw new Error("Expected " + expected + " assemblies marked " + mark + ", found " + matches.size + ".");
+    }
+    const rootIds = [...matches];
+    return {modelId, guid, rootIds, selector: createObjectSelector(modelId, rootIds, true)};
+  }
+
   const runtimeIds =
     await api.viewer.convertToObjectRuntimeIds(
       modelId,
@@ -925,7 +952,7 @@ async function applyFullModelTransparency(assembly) {
 
   const modelId = assembly.modelId;
   const guid = assembly.guid;
-  const selectedRuntimeId = assembly.runtimeId;
+  const rootIds = assembly.rootIds || [assembly.runtimeId];
   const selectedSelector = assembly.selector;
 
   fullTransparencyBusy = true;
@@ -959,7 +986,7 @@ async function applyFullModelTransparency(assembly) {
         modelId
       );
 
-    if (!selectedIds.includes(selectedRuntimeId)) {
+    if (!rootIds.every(id => selectedIds.includes(id))) {
       throw new Error(
         'Selected assembly ID is missing from protected objects.'
       );
@@ -972,12 +999,12 @@ async function applyFullModelTransparency(assembly) {
     const protectedIds =
       new Set(selectedIds);
 
-    protectedIds.add(selectedRuntimeId);
+
 
     const parents =
       await api.viewer.getHierarchyParents(
         modelId,
-        [selectedRuntimeId]
+        rootIds
       );
 
     const parentIds =
@@ -995,12 +1022,6 @@ async function applyFullModelTransparency(assembly) {
       allIds.filter(
         id => !protectedIds.has(id)
       );
-
-    if (surroundingIds.length === 0) {
-      throw new Error(
-        'No surrounding IFC objects were found.'
-      );
-    }
 
     if (
       surroundingIds.some(
@@ -1043,7 +1064,7 @@ async function applyFullModelTransparency(assembly) {
     fullTransparencyDetails = {
       modelId,
       guid,
-      selectedRuntimeId,
+      rootIds,
       totalObjectCount: allIds.length,
       protectedObjectCount: protectedIds.size,
       surroundingObjectCount: surroundingIds.length,
@@ -1257,7 +1278,7 @@ async function findAssembly() {
   const modelId =
     el('model').value;
 
-  if (!validGuid(guid)) {
+  if (!validTarget(guid)) {
     throw new Error(
       'Enter a valid 36-character Tekla assembly GUID.'
     );
@@ -1539,7 +1560,7 @@ async function pasteDrawingGuidAndConnect() {
     .trim()
     .toLowerCase();
 
-  if (!validGuid(guid)) {
+  if (!validTarget(guid)) {
     throw new Error(
       'The clipboard does not contain a valid ' +
       '36-character Tekla assembly GUID.'
@@ -1657,7 +1678,7 @@ window.addEventListener("message", async (event) => {
         .trim()
         .toLowerCase();
 
-    if (!validGuid(guid)) {
+    if (!validTarget(guid)) {
         log("Chrome Bridge supplied an invalid GUID.");
         return;
     }
@@ -1817,7 +1838,7 @@ window.addEventListener("message", function (event) {
         data.type !== "BPA_LIVE_NAVIGATE" ||
         typeof data.requestId !== "string" ||
         !data.requestId ||
-        !validGuid(data.guid)
+        !validTarget(data.guid)
     ) {
         return;
     }
@@ -1943,7 +1964,7 @@ if (!incomingGuid) {
 
 if (incomingGuid) {
 
-  if (validGuid(incomingGuid)) {
+  if (validTarget(incomingGuid)) {
 
     el('guid').value = incomingGuid;
 

@@ -105,12 +105,23 @@ const projectUrl = projects[projectKey] || "";
         button.disabled = true;
     }
 
-    if (!guidPattern.test(teklaGuid)) {
+    const position = params.get("p");
+    const quantity = params.get("q");
+    if (position !== null) {
+        if (!position.trim() || position.length > 79 || !/^[1-9]\d{0,8}$/.test(quantity)) {
+            fail("Invalid assembly position or quantity.");
+            return;
+        }
+        // The existing handoff normalizes its target to lowercase. Encode the exact mark losslessly.
+        const hex = Array.from(new TextEncoder().encode(position), byte => byte.toString(16).padStart(2, "0")).join("");
+        teklaGuid = "pos-" + hex + "-" + quantity;
+    }
+    if (position === null && !guidPattern.test(teklaGuid)) {
         fail("Invalid or missing Tekla assembly GUID.");
         return;
     }
 
-    if (!ifcPattern.test(ifcGuid)) {
+    if (position === null && !ifcPattern.test(ifcGuid)) {
         fail("Invalid or missing IFC GlobalId.");
         return;
     }
@@ -133,10 +144,10 @@ const projectUrl = projects[projectKey] || "";
     }
 
     document.getElementById("assembly").textContent =
-        teklaGuid;
+        position === null ? teklaGuid : position;
 
     document.getElementById("ifc").textContent =
-        ifcGuid;
+        position === null ? ifcGuid : "Qty " + quantity;
 
     document.getElementById("project").textContent =
         project.href;
