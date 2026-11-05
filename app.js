@@ -665,6 +665,7 @@ try {
         await api.project.getProject();
 
     log('Connected to Trimble Connect', {
+      navigatorBuild: 'assembly-labels-2',
         projectId: project?.id,
         projectName: project?.name
     });
@@ -1446,6 +1447,10 @@ async function findAssembly() {
     if (labelWarning) log('Assembly label warning', {message: labelWarning});
 
     log('Assembly navigation completed', {
+      navigatorBuild: 'assembly-labels-2',
+      labelCount,
+      labelIds: assemblyLabelIds.slice(),
+      labelWarning: labelWarning || null,
       modelId,
       guid,
       runtimeId: assembly.runtimeId,
