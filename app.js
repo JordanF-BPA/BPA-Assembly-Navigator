@@ -665,7 +665,7 @@ try {
         await api.project.getProject();
 
     log('Connected to Trimble Connect', {
-      navigatorBuild: 'assembly-labels-3',
+      navigatorBuild: 'assembly-labels-4',
         projectId: project?.id,
         projectName: project?.name
     });
@@ -942,7 +942,7 @@ async function addAssemblyLabels(assembly) {
     const offset = Math.max(150, Math.min(1000,
       Math.max(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z) * 0.1));
     labels.push({text: mark, start, end: {...start, positionZ: start.positionZ + offset},
-      color: {r: 36, g: 92, b: 156, a: 255}});
+      color: {r: 255, g: 0, b: 255, a: 255}});
   }
   log('Assembly label anchors (millimetres)', labels.map(label => ({
     text: label.text, objectId: label.start.objectId,
@@ -1455,7 +1455,7 @@ async function findAssembly() {
     if (labelWarning) log('Assembly label warning', {message: labelWarning});
 
     log('Assembly navigation completed', {
-      navigatorBuild: 'assembly-labels-3',
+      navigatorBuild: 'assembly-labels-4',
       labelCount,
       labelIds: assemblyLabelIds.slice(),
       labelWarning: labelWarning || null,
