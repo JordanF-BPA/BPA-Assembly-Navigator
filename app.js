@@ -872,6 +872,81 @@ function normalizePosition(value) {
   return typeof value === "string" ? value.normalize("NFKC").trim().replace(/\s*\(\s*\?\s*\)$/, "").trim() : "";
 }
 
+// Only IDs returned for this Navigator's markups may be removed. Never clear all markups.
+let assemblyLabelIds = [];
+
+async function clearAssemblyLabels() {
+  if (!assemblyLabelIds.length) return;
+  await api.markup.removeMarkups(assemblyLabelIds.slice());
+  assemblyLabelIds = [];
+}
+
+function validLabelBox(box) {
+  return box && ['x', 'y', 'z'].every(axis =>
+    Number.isFinite(box.min?.[axis]) && Number.isFinite(box.max?.[axis]) &&
+    box.max[axis] >= box.min[axis]) &&
+    ['x', 'y', 'z'].some(axis => box.max[axis] > box.min[axis]);
+}
+
+async function assemblyLabelBox(modelId, rootId) {
+  const roots = await api.viewer.getObjectBoundingBoxes(modelId, [rootId]);
+  const root = roots.find(item => item.id === rootId);
+  if (validLabelBox(root?.boundingBox)) return root.boundingBox;
+
+  // Some IFC assembly containers have no geometry; use their member extents.
+  const groups = await api.viewer.getObjects(createObjectSelector(modelId, [rootId], true));
+  const ids = [...new Set(groups.filter(group => group.modelId === modelId)
+    .flatMap(group => group.objects || []).map(object => object.id))].filter(id => id !== rootId);
+  const boxes = [];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const batch = ids.slice(offset, offset + 100);
+    const members = await api.viewer.getObjectBoundingBoxes(modelId, batch);
+    boxes.push(...members.filter(item => batch.includes(item.id) && validLabelBox(item.boundingBox))
+      .map(item => item.boundingBox));
+  }
+  if (!boxes.length) throw new Error('No label position available for assembly ' + rootId + '.');
+  return {
+    min: Object.fromEntries(['x','y','z'].map(axis => [axis, Math.min(...boxes.map(box => box.min[axis]))])),
+    max: Object.fromEntries(['x','y','z'].map(axis => [axis, Math.max(...boxes.map(box => box.max[axis]))]))
+  };
+}
+
+async function addAssemblyLabels(assembly) {
+  if (!api.markup?.addTextMarkup || !api.markup?.removeMarkups || !api.viewer.getObjectBoundingBoxes)
+    throw new Error('Text markup tools are unavailable in this viewer.');
+  const roots = [...new Set(assembly.rootIds || [assembly.runtimeId])];
+  const labels = [];
+  for (const rootId of roots) {
+    let mark = assembly.position;
+    if (!mark) {
+      const objects = await api.viewer.getObjectProperties(assembly.modelId, [rootId]);
+      const properties = (objects.find(object => object.id === rootId)?.properties || [])
+        .flatMap(set => set.properties || []);
+      const field = properties.find(item => item.name?.trim().toLowerCase() === 'assembly/cast unit mark') ||
+        properties.find(item => item.name === 'Tag');
+      mark = normalizePosition(field?.value);
+    }
+    if (!mark) throw new Error('Assembly position is unavailable for label ' + rootId + '.');
+    const box = await assemblyLabelBox(assembly.modelId, rootId);
+    const start = {
+      modelId: assembly.modelId, objectId: rootId,
+      positionX: (box.min.x + box.max.x) / 2,
+      positionY: (box.min.y + box.max.y) / 2,
+      positionZ: box.max.z
+    };
+    const offset = Math.max(150, Math.min(1000,
+      Math.max(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z) * 0.1));
+    labels.push({text: mark, start, end: {...start, positionZ: start.positionZ + offset},
+      color: {r: 36, g: 92, b: 156, a: 255}});
+  }
+  const created = await api.markup.addTextMarkup(labels);
+  assemblyLabelIds = (Array.isArray(created) ? created : [])
+    .map(label => label.id).filter(Number.isInteger);
+  if (assemblyLabelIds.length !== roots.length)
+    throw new Error('The viewer did not confirm every assembly label.');
+  return assemblyLabelIds.length;
+}
+
 async function resolveAssembly(modelId, guid) {
 
   const position = positionTarget.exec(guid);
@@ -897,7 +972,7 @@ async function resolveAssembly(modelId, guid) {
       throw new Error("Expected " + expected + " assemblies marked " + mark + ", found " + matches.size + " after ignoring (?).");
     }
     const rootIds = [...matches];
-    return {modelId, guid, rootIds, selector: createObjectSelector(modelId, rootIds, true)};
+    return {modelId, guid, position: wanted, rootIds, selector: createObjectSelector(modelId, rootIds, true)};
   }
 
   const runtimeIds =
@@ -1313,6 +1388,10 @@ async function findAssembly() {
     // STEP 2 - RESTORE PREVIOUS NAVIGATION
     // --------------------------------------------------------
 
+    let labelWarning = '';
+    try { await clearAssemblyLabels(); }
+    catch (error) { labelWarning = 'Previous Navigator labels could not be removed: ' + error.message; }
+
     if (fullTransparencyActive) {
 
       status('Restoring previous model appearance...');
@@ -1359,6 +1438,13 @@ async function findAssembly() {
     // STEP 6 - COMPLETE
     // --------------------------------------------------------
 
+    let labelCount = 0;
+    if (!labelWarning) {
+      try { labelCount = await addAssemblyLabels(assembly); }
+      catch (error) { labelWarning = 'Assembly labels: ' + error.message; }
+    }
+    if (labelWarning) log('Assembly label warning', {message: labelWarning});
+
     log('Assembly navigation completed', {
       modelId,
       guid,
@@ -1369,7 +1455,8 @@ async function findAssembly() {
     });
 
     status(
-      'Assembly found. Surrounding steelwork is transparent.'
+      'Assembly found. Surrounding steelwork is transparent. ' +
+      (labelWarning || labelCount + ' assembly position label(s) added.')
     );
 
     return true;
@@ -1404,6 +1491,8 @@ async function restoreNavigationAppearance() {
   }
 
   await restoreFullModelTransparency();
+
+  await clearAssemblyLabels();
 
   updateButtons();
 }
