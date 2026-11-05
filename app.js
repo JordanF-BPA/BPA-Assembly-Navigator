@@ -2029,6 +2029,7 @@ window.addEventListener("message", function (event) {
 // Only register from the 3D Viewer.
 // Project Explorer must continue using its existing GUID handoff.
 (async function () {
+    if (document.getElementById("embeddedTrial")) return;
 
     try {
         if (!api) {
@@ -2068,11 +2069,11 @@ updateButtons();
 // Establish the connection on startup so a Project
 // Explorer extension can register its navigation menu.
 
-if (!incomingGuid) {
+if (!incomingGuid && !document.getElementById("embeddedTrial")) {
     run(connect)();
 }
 
-if (incomingGuid) {
+if (incomingGuid && !document.getElementById("embeddedTrial")) {
 
   if (validTarget(incomingGuid)) {
 

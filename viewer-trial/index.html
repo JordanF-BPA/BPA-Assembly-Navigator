@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>BPA Assembly Navigator viewer trial</title>
+<style>
+body{margin:0;font:16px system-ui;color:#20334a;display:flex;flex-direction:column;height:100vh}
+section,details{padding:8px 16px}iframe{border:0;width:100%;flex:1}input{width:28em;max-width:90%}
+pre{overflow:auto;max-height:25vh}button{padding:6px 12px}
+</style>
+<script defer src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<script defer src="../app.js?v=embedded-trial-1"></script><script defer src="trial.js"></script></head>
+<body><section><strong>BPA Assembly Navigator</strong><p id="status" role="status">Checking drawing destination…</p>
+<form id="signin" hidden><label>Trimble public client ID <input id="client" required></label>
+<button>Sign in with Trimble</button></form></section>
+<iframe id="embeddedTrial" title="Trimble Connect 3D viewer" hidden></iframe>
+<details><summary>Activity log</summary><pre id="log"></pre></details>
+<div hidden><input id="guid"><select id="model"></select><button id="connect"></button><button id="find"></button>
+<button id="restoreNavigation"></button><button id="pasteDrawingGuid"></button></div></body></html>
