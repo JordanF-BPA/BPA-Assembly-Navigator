@@ -665,7 +665,7 @@ try {
         await api.project.getProject();
 
     log('Connected to Trimble Connect', {
-      navigatorBuild: 'assembly-labels-2',
+      navigatorBuild: 'assembly-labels-3',
         projectId: project?.id,
         projectName: project?.name
     });
@@ -928,7 +928,11 @@ async function addAssemblyLabels(assembly) {
       mark = normalizePosition(field?.value);
     }
     if (!mark) throw new Error('Assembly position is unavailable for label ' + rootId + '.');
-    const box = await assemblyLabelBox(assembly.modelId, rootId);
+    const viewerBox = await assemblyLabelBox(assembly.modelId, rootId);
+    // Viewer geometry is in metres; MarkupPick positions are in millimetres.
+    // Convert both bounds once, before calculating the anchor and label offset.
+    const box = Object.fromEntries(['min', 'max'].map(side => [side,
+      Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, viewerBox[side][axis] * 1000]))]));
     const start = {
       modelId: assembly.modelId, objectId: rootId,
       positionX: (box.min.x + box.max.x) / 2,
@@ -940,6 +944,10 @@ async function addAssemblyLabels(assembly) {
     labels.push({text: mark, start, end: {...start, positionZ: start.positionZ + offset},
       color: {r: 36, g: 92, b: 156, a: 255}});
   }
+  log('Assembly label anchors (millimetres)', labels.map(label => ({
+    text: label.text, objectId: label.start.objectId,
+    x: label.start.positionX, y: label.start.positionY, z: label.start.positionZ
+  })));
   const created = await api.markup.addTextMarkup(labels);
   assemblyLabelIds = (Array.isArray(created) ? created : [])
     .map(label => label.id).filter(Number.isInteger);
@@ -1447,7 +1455,7 @@ async function findAssembly() {
     if (labelWarning) log('Assembly label warning', {message: labelWarning});
 
     log('Assembly navigation completed', {
-      navigatorBuild: 'assembly-labels-2',
+      navigatorBuild: 'assembly-labels-3',
       labelCount,
       labelIds: assemblyLabelIds.slice(),
       labelWarning: labelWarning || null,
