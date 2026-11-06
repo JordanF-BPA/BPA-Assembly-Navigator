@@ -370,6 +370,8 @@ async function openDirectDrawing(command) {
         log("Direct drawing command accepted", {guid, projectId:project.id, modelId:match[3]});
         const host = await api.extension.getHost();
         if (host.name === "project") {
+            if (typeof handoffDirectDrawing === "function" &&
+                await handoffDirectDrawing(project.id, match[3], guid)) return;
             await launchPendingAssemblyInViewer(project.id, match[3]);
         } else if (host.name === "3dviewer") {
             latestLiveRequest = {guid, modelId:match[3]};
