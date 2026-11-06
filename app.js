@@ -354,16 +354,53 @@ log("Project Explorer menu registered.");
 // First verify that the navigation entry appears.
 }
 
+let directDrawingCommand = null;
+
+async function openDirectDrawing(command) {
+    const match = /^BPA_NAVIGATOR_DRAWING_((?:[0-9a-f]{2}){1,316})_([1-9]\d{0,8})_([A-Za-z0-9_-]{1,64})$/.exec(command);
+    if (!match || command === directDrawingCommand) return;
+    directDrawingCommand = command;
+    try {
+        // Command events can arrive before WorkspaceAPI.connect resolves.
+        for (let attempt = 0; (!api || connectionBusy) && attempt < 120; attempt++) await delay(250);
+        if (!api || connectionBusy) throw new Error("Connect is still starting. Reopen the drawing link.");
+        const project = await api.project.getProject();
+        const guid = "pos-" + match[1] + "-" + match[2];
+        el("guid").value = guid;
+        log("Direct drawing command accepted", {guid, projectId:project.id, modelId:match[3]});
+        const host = await api.extension.getHost();
+        if (host.name === "project") {
+            await launchPendingAssemblyInViewer(project.id, match[3]);
+        } else if (host.name === "3dviewer") {
+            latestLiveRequest = {guid, modelId:match[3]};
+            await processLiveNavigation();
+        } else {
+            throw new Error("Direct drawing commands require Project Explorer or the 3D viewer.");
+        }
+    } catch (error) {
+        directDrawingCommand = null;
+        reportError(error);
+    }
+}
+
 function handleProjectExplorerCommand(event, args) {
 
     if (event !== "extension.command") {
         return;
     }
 
+    // Record the actual route event for the direct-link trial.
+    log("Direct link trial: extension.command", args?.data ?? args);
+
     const command =
         typeof args?.data === "string"
             ? args.data
             : args?.data?.command || "";
+
+    if (typeof command === "string" && command.startsWith("BPA_NAVIGATOR_DRAWING_")) {
+        void openDirectDrawing(command);
+        return;
+    }
 
     console.log(
         "[BPA Project Explorer] Command received:",
