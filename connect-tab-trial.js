@@ -84,8 +84,26 @@ async function handoffDirectDrawing(projectId, modelId, guid) {
     }
     log("Existing Connect viewer acknowledged drawing", {guid, projectId, modelId});
     status("Drawing sent to your existing Connect viewer. You can close this temporary tab.");
-    try { window.top.close(); } catch (error) {
-        log("Browser kept the temporary tab open", error.message);
+    function closeTemporaryTab() {
+        try {
+            window.top.close();
+        } catch (error) {
+            log("Temporary tab close error", {name:error.name, message:error.message});
+        }
+        setTimeout(() => {
+            status("Drawing received by the existing viewer. Chrome kept this tab open. Press Ctrl+W to close this temporary tab.");
+            log("Temporary tab still open after close request");
+        }, 600);
     }
+    let closeButton = document.getElementById("closeHandoffTab");
+    if (!closeButton) {
+        closeButton = document.createElement("button");
+        closeButton.id = "closeHandoffTab";
+        closeButton.type = "button";
+        closeButton.textContent = "Close this tab";
+        closeButton.addEventListener("click", closeTemporaryTab);
+        el("status").insertAdjacentElement("afterend", closeButton);
+    }
+    closeTemporaryTab();
     return true;
 }
