@@ -7,14 +7,14 @@
 
   <title>BPA Assembly Navigator</title>
 
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=stepper-drag-1">
 
   <script
     src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"
     defer>
   </script>
 
-<script src="assembly-stepper.js?v=1" defer></script>
+<script src="assembly-stepper.js?v=2" defer></script>
 <script src="app.js?v=assembly-stepper-1" defer></script>
 <script src="connect-tab-trial.js?v=4" defer></script>
 </head>
@@ -86,7 +86,7 @@
   </main>
 
   <dialog id="assemblyStepper" aria-labelledby="assemblyStepperTitle">
-    <strong id="assemblyStepperTitle">Drawing assemblies</strong>
+    <strong id="assemblyStepperTitle" tabindex="0" title="Drag to move, or use arrow keys when focused">Drawing assemblies</strong>
     <p id="assemblyStepperCount" role="status" aria-live="polite"></p>
     <div class="actions">
       <button id="assemblyPrevious" type="button" aria-label="Previous assembly">&#8592; Previous</button>

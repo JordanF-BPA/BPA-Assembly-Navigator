@@ -17,6 +17,7 @@ function showAssemblyStepper(assembly) {
     assembly.position ? 'Assembly ' + assembly.position : 'Drawing assemblies';
   renderAssemblyStep();
   document.getElementById('assemblyStepper').show();
+  if (assemblyStepperPosition) positionAssemblyStepper(assemblyStepperPosition.x, assemblyStepperPosition.y);
 }
 
 function renderAssemblyStep() {
@@ -61,3 +62,50 @@ async function stepAssembly(direction) {
 document.getElementById('assemblyPrevious').addEventListener('click', () => stepAssembly(-1));
 document.getElementById('assemblyNext').addEventListener('click', () => stepAssembly(1));
 document.getElementById('assemblyAll').addEventListener('click', () => stepAssembly(0));
+
+// Keep the chosen position across drawing links in this viewer session.
+let assemblyStepperPosition = null;
+let assemblyStepperDrag = null;
+const stepperDialog = document.getElementById('assemblyStepper');
+const stepperHandle = document.getElementById('assemblyStepperTitle');
+
+function positionAssemblyStepper(x, y) {
+  const box = stepperDialog.getBoundingClientRect();
+  const viewport = document.documentElement;
+  x = Math.max(0, Math.min(x, viewport.clientWidth - box.width));
+  y = Math.max(0, Math.min(y, viewport.clientHeight - box.height));
+  assemblyStepperPosition = {x, y};
+  Object.assign(stepperDialog.style, {left:x+'px', top:y+'px', right:'auto', bottom:'auto', margin:'0'});
+}
+
+stepperHandle.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || assemblyStepperDrag) return;
+  const box = stepperDialog.getBoundingClientRect();
+  assemblyStepperDrag = {id:event.pointerId, x:event.clientX-box.left, y:event.clientY-box.top};
+  stepperHandle.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+stepperHandle.addEventListener('pointermove', event => {
+  if (assemblyStepperDrag?.id !== event.pointerId) return;
+  positionAssemblyStepper(event.clientX-assemblyStepperDrag.x, event.clientY-assemblyStepperDrag.y);
+});
+function finishAssemblyStepperDrag(event) {
+  if (assemblyStepperDrag?.id !== event.pointerId) return;
+  assemblyStepperDrag = null;
+  if (stepperHandle.hasPointerCapture(event.pointerId)) stepperHandle.releasePointerCapture(event.pointerId);
+}
+for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  stepperHandle.addEventListener(name, finishAssemblyStepperDrag);
+}
+stepperHandle.addEventListener('keydown', event => {
+  const direction = {ArrowLeft:[-1,0], ArrowRight:[1,0], ArrowUp:[0,-1], ArrowDown:[0,1]}[event.key];
+  if (!direction) return;
+  event.preventDefault();
+  const box = stepperDialog.getBoundingClientRect();
+  positionAssemblyStepper(box.left+direction[0]*10, box.top+direction[1]*10);
+});
+document.defaultView?.addEventListener('resize', () => {
+  if (stepperDialog.open && assemblyStepperPosition) {
+    positionAssemblyStepper(assemblyStepperPosition.x, assemblyStepperPosition.y);
+  }
+});
