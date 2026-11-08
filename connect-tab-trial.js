@@ -11,6 +11,13 @@ try {
 }
 const receivedConnectRequests = new Set();
 
+function notifyDirectTabHelper(role, data, viewerId) {
+    document.dispatchEvent(new CustomEvent("bpa-direct-tab-handoff", {detail:JSON.stringify({
+        role, requestId:data.requestId, viewerId,
+        projectId:data.projectId, modelId:data.modelId, guid:data.guid
+    })}));
+}
+
 async function canReceiveDrawing(data) {
     if (!api || connectionBusy || directDrawingCommand ||
         typeof data.projectId !== "string" || typeof data.modelId !== "string") return false;
@@ -39,6 +46,7 @@ if (connectTabChannel) connectTabChannel.addEventListener("message", async ({dat
             log("Direct drawing received from another Connect tab", {guid:data.guid, modelId:data.modelId});
             void processLiveNavigation();
         }
+        notifyDirectTabHelper("received", data, connectTabId);
         connectTabChannel.postMessage({type:"accepted", requestId:data.requestId, receiver:data.sender, sender:connectTabId});
         try { window.top.focus(); } catch (_) { /* Browser controls tab focus. */ }
     } catch (error) {
@@ -70,7 +78,7 @@ async function handoffDirectDrawing(projectId, modelId, guid) {
                 connectTabChannel.postMessage(delivery);
                 retry = setTimeout(() => connectTabChannel.postMessage(delivery), 1000);
             } else if (data.type === "accepted" && viewer && data.sender === viewer) {
-                finish(true);
+                finish(viewer);
             }
         }
         connectTabChannel.addEventListener("message", receive);
@@ -83,6 +91,7 @@ async function handoffDirectDrawing(projectId, modelId, guid) {
         return false;
     }
     log("Existing Connect viewer acknowledged drawing", {guid, projectId, modelId});
+    notifyDirectTabHelper("sent", {...base, guid}, accepted);
     status("Drawing sent to your existing Connect viewer. You can close this temporary tab.");
     function closeTemporaryTab() {
         try {
