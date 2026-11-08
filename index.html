@@ -14,7 +14,8 @@
     defer>
   </script>
 
-<script src="app.js?v=connect-tab-trial-1" defer></script>
+<script src="assembly-stepper.js?v=1" defer></script>
+<script src="app.js?v=assembly-stepper-1" defer></script>
 <script src="connect-tab-trial.js?v=4" defer></script>
 </head>
 
@@ -84,5 +85,14 @@
 
   </main>
 
+  <dialog id="assemblyStepper" aria-labelledby="assemblyStepperTitle">
+    <strong id="assemblyStepperTitle">Drawing assemblies</strong>
+    <p id="assemblyStepperCount" role="status" aria-live="polite"></p>
+    <div class="actions">
+      <button id="assemblyPrevious" type="button" aria-label="Previous assembly">&#8592; Previous</button>
+      <button id="assemblyNext" type="button" aria-label="Next assembly">Next &#8594;</button>
+      <button id="assemblyAll" type="button">Show all</button>
+    </div>
+  </dialog>
 </body>
 </html>

@@ -238,6 +238,7 @@ el('find').disabled =
 
   el('guid').disabled = busy;
   el('model').disabled = busy;
+  updateAssemblyStepperButtons(busy);
 }
 
 // ============================================================
@@ -1416,6 +1417,7 @@ async function findAssembly() {
   }
 
   assemblyNavigationBusy = true;
+  clearAssemblyStepper();
   updateButtons();
 
   try {
@@ -1493,6 +1495,8 @@ async function findAssembly() {
     }
     if (labelWarning) log('Assembly label warning', {message: labelWarning});
 
+    showAssemblyStepper(assembly);
+
     log('Assembly navigation completed', {
       navigatorBuild: 'assembly-labels-4',
       labelCount,
@@ -1542,6 +1546,7 @@ async function restoreNavigationAppearance() {
     );
   }
 
+  clearAssemblyStepper();
   await restoreFullModelTransparency();
 
   await clearAssemblyLabels();
