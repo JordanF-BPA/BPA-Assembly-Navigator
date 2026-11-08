@@ -1,11 +1,14 @@
 // Non-modal controls stay inside the Navigator frame; the 3D viewer remains usable.
 let steppedAssembly = null;
 let assemblyStepIndex = -1;
+let stepperToken = 'initial';
 
 function clearAssemblyStepper() {
   steppedAssembly = null;
   assemblyStepIndex = -1;
+  stepperToken = String(Date.now()) + '-' + Math.random().toString(36).slice(2);
   document.getElementById('assemblyStepper').close();
+  publishAssemblyStepper();
 }
 
 function showAssemblyStepper(assembly) {
@@ -17,6 +20,7 @@ function showAssemblyStepper(assembly) {
     assembly.position ? 'Assembly ' + assembly.position : 'Drawing assemblies';
   renderAssemblyStep();
   document.getElementById('assemblyStepper').show();
+  publishAssemblyStepper();
   if (assemblyStepperPosition) positionAssemblyStepper(assemblyStepperPosition.x, assemblyStepperPosition.y);
 }
 
@@ -26,12 +30,14 @@ function renderAssemblyStep() {
   document.getElementById('assemblyStepperCount').textContent = assemblyStepIndex < 0
     ? 'Showing all ' + total + ' assemblies'
     : 'Assembly ' + (assemblyStepIndex + 1) + ' of ' + total;
+  publishAssemblyStepper();
 }
 
 function updateAssemblyStepperButtons(busy) {
   for (const id of ['assemblyPrevious', 'assemblyNext', 'assemblyAll']) {
     document.getElementById(id).disabled = busy || !steppedAssembly;
   }
+  publishAssemblyStepper();
 }
 
 async function stepAssembly(direction) {
@@ -109,3 +115,26 @@ document.defaultView?.addEventListener('resize', () => {
     positionAssemblyStepper(assemblyStepperPosition.x, assemblyStepperPosition.y);
   }
 });
+
+function publishAssemblyStepper() {
+  if (!document.dispatchEvent) return;
+  document.dispatchEvent(new CustomEvent('bpa-stepper-state', {detail:JSON.stringify({
+    token:stepperToken, title:steppedAssembly?.position ? 'Assembly '+steppedAssembly.position : 'Drawing assemblies',
+    count:steppedAssembly?.rootIds.length || 0, index:assemblyStepIndex,
+    busy:assemblyNavigationBusy || fullTransparencyBusy || connectionBusy || autoNavigationRunning
+  })}));
+}
+let stepperOverlaySeen = 0;
+document.addEventListener?.('bpa-stepper-overlay-ready', () => {
+  stepperOverlaySeen = Date.now();
+  stepperDialog.close();
+});
+document.addEventListener?.('bpa-stepper-action', event => {
+  let message;
+  try { message = JSON.parse(event.detail); } catch (_) { return; }
+  if (message.token === stepperToken && [-1,0,1].includes(message.direction)) void stepAssembly(message.direction);
+});
+document.defaultView?.setInterval(() => {
+  publishAssemblyStepper();
+  if (steppedAssembly && Date.now()-stepperOverlaySeen > 6000 && !stepperDialog.open) stepperDialog.show();
+},2000);
