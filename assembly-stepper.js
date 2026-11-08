@@ -42,7 +42,7 @@ function updateAssemblyStepperButtons(busy) {
 
 async function stepAssembly(direction) {
   if (!steppedAssembly || assemblyNavigationBusy || fullTransparencyBusy ||
-      connectionBusy || autoNavigationRunning) return;
+      connectionBusy || autoNavigationRunning) return {ok:false,error:'Navigator is busy. Please try again in a moment.'};
   const group = steppedAssembly;
   const count = group.rootIds.length;
   const next = direction === 0 ? -1 : assemblyStepIndex < 0
@@ -57,8 +57,10 @@ async function stepAssembly(direction) {
     await api.viewer.setCamera(selector);
     assemblyStepIndex = next;
     renderAssemblyStep();
+    return {ok:true};
   } catch (error) {
     reportError(error);
+    return {ok:false,error:error.message};
   } finally {
     assemblyNavigationBusy = false;
     updateButtons();
@@ -129,10 +131,13 @@ document.addEventListener?.('bpa-stepper-overlay-ready', () => {
   stepperOverlaySeen = Date.now();
   stepperDialog.close();
 });
-document.addEventListener?.('bpa-stepper-action', event => {
+document.addEventListener?.('bpa-stepper-action', async event => {
   let message;
   try { message = JSON.parse(event.detail); } catch (_) { return; }
-  if (message.token === stepperToken && [-1,0,1].includes(message.direction)) void stepAssembly(message.direction);
+  let result = {ok:false,error:'This drawing has changed. Use its current controls.'};
+  if (message.token === stepperToken && [-1,0,1].includes(message.direction)) result = await stepAssembly(message.direction);
+  publishAssemblyStepper();
+  document.dispatchEvent(new CustomEvent('bpa-stepper-action-result',{detail:JSON.stringify({...result,requestId:message.requestId})}));
 });
 document.defaultView?.setInterval(() => {
   publishAssemblyStepper();
