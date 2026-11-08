@@ -11,6 +11,23 @@ try {
 }
 const receivedConnectRequests = new Set();
 
+// The Chrome helper delivers directly into an already-loaded viewer frame.
+document.addEventListener("bpa-fast-drawing", async event => {
+    let data;
+    try {
+        data = JSON.parse(event.detail);
+        if (typeof data.requestId !== "string" || typeof data.guid !== "string" ||
+            !validTarget(data.guid)) return;
+        if (!await canReceiveDrawing(data)) return;
+        latestLiveRequest = {guid:data.guid, modelId:data.modelId};
+        log("Fast drawing received from Chrome helper", {guid:data.guid, modelId:data.modelId});
+        void processLiveNavigation();
+        document.dispatchEvent(new CustomEvent("bpa-fast-drawing-result", {
+            detail:JSON.stringify({requestId:data.requestId, ok:true})
+        }));
+    } catch (error) { log("Fast drawing handoff unavailable", error.message); }
+});
+
 function notifyDirectTabHelper(role, data, viewerId) {
     document.dispatchEvent(new CustomEvent("bpa-direct-tab-handoff", {detail:JSON.stringify({
         role, requestId:data.requestId, viewerId,
