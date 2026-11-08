@@ -19,8 +19,8 @@ function showAssemblyStepper(assembly) {
   document.getElementById('assemblyStepperTitle').textContent =
     assembly.position ? 'Assembly ' + assembly.position : 'Drawing assemblies';
   renderAssemblyStep();
-  document.getElementById('assemblyStepper').show();
-  publishAssemblyStepper();
+  if (!stepperOverlaySeen) document.getElementById('assemblyStepper').show();
+  publishAssemblyStepper(true);
   if (assemblyStepperPosition) positionAssemblyStepper(assemblyStepperPosition.x, assemblyStepperPosition.y);
 }
 
@@ -116,10 +116,10 @@ document.defaultView?.addEventListener('resize', () => {
   }
 });
 
-function publishAssemblyStepper() {
+function publishAssemblyStepper(claim = false) {
   if (!document.dispatchEvent) return;
   document.dispatchEvent(new CustomEvent('bpa-stepper-state', {detail:JSON.stringify({
-    token:stepperToken, title:steppedAssembly?.position ? 'Assembly '+steppedAssembly.position : 'Drawing assemblies',
+    token:stepperToken, claim, title:steppedAssembly?.position ? 'Assembly '+steppedAssembly.position : 'Drawing assemblies',
     count:steppedAssembly?.rootIds.length || 0, index:assemblyStepIndex,
     busy:assemblyNavigationBusy || fullTransparencyBusy || connectionBusy || autoNavigationRunning
   })}));
@@ -136,5 +136,6 @@ document.addEventListener?.('bpa-stepper-action', event => {
 });
 document.defaultView?.setInterval(() => {
   publishAssemblyStepper();
-  if (steppedAssembly && Date.now()-stepperOverlaySeen > 6000 && !stepperDialog.open) stepperDialog.show();
+  // Once the helper owns the UI, delayed heartbeats must not reopen the fallback.
+  if (steppedAssembly && !stepperOverlaySeen && !stepperDialog.open) stepperDialog.show();
 },2000);
