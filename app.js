@@ -358,7 +358,7 @@ log("Project Explorer menu registered.");
 let directDrawingCommand = null;
 
 async function openDirectDrawing(command) {
-    const match = /^BPA_NAVIGATOR_DRAWING_((?:[0-9a-f]{2}){1,316})_([1-9]\d{0,8})_([A-Za-z0-9_-]{1,64})$/.exec(command);
+    const match = /^BPA_NAVIGATOR_DRAWING_((?:[0-9a-f]{2}){1,316})_([1-9]\d{0,8})(?:_([A-Za-z0-9_-]{1,64}))?$/.exec(command);
     if (!match || command === directDrawingCommand) return;
     directDrawingCommand = command;
     try {
@@ -369,6 +369,7 @@ async function openDirectDrawing(command) {
         const guid = "pos-" + match[1] + "-" + match[2];
         el("guid").value = guid;
         log("Direct drawing command accepted", {guid, projectId:project.id, modelId:match[3]});
+        if (!match[3]) { await openProjectDrawing(project.id, guid); return; }
         const host = await api.extension.getHost();
         if (host.name === "project") {
             if (typeof handoffDirectDrawing === "function" &&
@@ -650,6 +651,7 @@ api = await window.TrimbleConnectWorkspace.connect(
             );
         }
 
+        if (typeof handleModelChoiceEvent === "function") handleModelChoiceEvent(event, args);
         handleProjectExplorerCommand(event, args);
     },
     30000
@@ -705,7 +707,7 @@ try {
         await api.project.getProject();
 
     log('Connected to Trimble Connect', {
-      navigatorBuild: 'assembly-members-3',
+      navigatorBuild: 'project-model-choice-1',
         projectId: project?.id,
         projectName: project?.name
     });
@@ -1517,7 +1519,7 @@ async function findAssembly() {
     showAssemblyStepper(assembly);
 
     log('Assembly navigation completed', {
-      navigatorBuild: 'assembly-members-3',
+      navigatorBuild: 'project-model-choice-1',
       labelCount,
       labelIds: assemblyLabelIds.slice(),
       labelWarning: labelWarning || null,
@@ -1679,8 +1681,16 @@ async function attemptAutoNavigation() {
   } catch (error) {
 
     autoNavigationPending = false;
-
     reportError(error);
+    if (!fullTransparencyActive) {
+      try {
+        const project = await api.project.getProject();
+        if (readProjectModel(project.id)?.modelId === navigationModelId) {
+          await showProjectModelChoice(project.id, incomingGuid);
+          el('modelChoiceMessage').textContent = 'The drawing could not be located in the remembered model. Choose a different model or check that it is up to date. ' + error.message;
+        }
+      } catch (choiceError) { log('Model choice recovery unavailable', choiceError.message); }
+    }
 
   } finally {
 

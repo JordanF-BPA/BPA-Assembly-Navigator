@@ -15,7 +15,8 @@
   </script>
 
 <script src="assembly-stepper.js?v=5" defer></script>
-<script src="app.js?v=assembly-members-3" defer></script>
+<script src="project-model-choice.js?v=1" defer></script>
+<script src="app.js?v=project-model-choice-1" defer></script>
 <script src="connect-tab-trial.js?v=4" defer></script>
 </head>
 
@@ -32,6 +33,16 @@
 
   <main>
 
+    <section id="projectModelChoice" hidden>
+      <h2>Choose the model for this project</h2>
+      <p>Select an IFC, TrimBIM or Tekla model below, then choose Use this model. Your choice is remembered in this browser for this project.</p>
+      <p id="modelChoiceMessage" role="status"></p>
+      <button id="loadModelBrowser" type="button">Browse project models</button>
+      <iframe id="projectModelBrowser" title="Choose a Trimble Connect model" hidden style="width:100%;height:520px;border:1px solid #ccc"></iframe>
+      <button id="confirmProjectModel" type="button" disabled>Use this model</button>
+    </section>
+    <button id="changeProjectModel" type="button">Change remembered model</button>
+    <p id="rememberedProjectModel" role="status"></p>
     <label for="guid">Tekla assembly GUID</label>
 
     <input
