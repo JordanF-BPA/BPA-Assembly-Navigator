@@ -46,7 +46,8 @@ async function requestProjectBrowserToken() {
 }
 function modelFileFromEvent(args) {
     // Project-extension events wrap the file; embedded explorer actions carry it directly.
-    const file = args?.data?.file || args?.data;
+    const payload = args?.data?.file || args?.data;
+    const file = Array.isArray(payload) ? (payload.length === 1 ? payload[0] : null) : payload;
     return file && file.type === 'FILE' && projectChoiceId.test(file.id || '') &&
         /\.(ifc|trb|tekla)$/i.test(file.name || '') ? {id:file.id, name:file.name} : null;
 }
@@ -71,7 +72,11 @@ async function browseProjectModels() {
     try {
         const token = await requestProjectBrowserToken();
         if (generation !== projectChoiceGeneration) return;
-        const frame = el('projectModelBrowser');
+        // Workspace API caches connections by iframe window. A new frame gets a fresh callback.
+        const previousFrame = el('projectModelBrowser');
+        const frame = previousFrame.cloneNode(false);
+        frame.removeAttribute('src');
+        previousFrame.replaceWith(frame);
         frame.hidden = false;
         await new Promise((resolve, reject) => {
             const timeout = setTimeout(() => reject(Error('Model browser did not load. Try Browse project models again.')), 30000);
@@ -96,7 +101,7 @@ async function browseProjectModels() {
             throw Error('Connect rejected the model browser session. Click Browse project models to retry.');
         const accepted = await browser.embed.initFileExplorer({projectId:request.projectId,
             enableAdd:false, enableUploadFiles:false, enableCreateFolder:false,
-            enableExplorerAllProjects:false, enableExplorerKebabMenu:false, enableSelect:true,
+            enableExplorerAllProjects:false, enableExplorerKebabMenu:false, enableSelect:false,
             fileTypeFilter:['ifc','trb','tekla']});
         if (accepted === false) throw Error('Connect could not open the project model browser.');
         if (generation !== projectChoiceGeneration) return;
