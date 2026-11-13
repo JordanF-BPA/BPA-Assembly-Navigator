@@ -7,15 +7,37 @@ let projectChoiceFile = null;
 let projectChoiceBrowser = null;
 let projectChoiceTokenWaiter = null;
 let projectChoiceGeneration = 0;
+let projectChoiceSession = null;
+async function refreshProjectChoiceSession() {
+    if (!document.dispatchEvent) return;
+    projectChoiceSession = await new Promise(resolve => {
+        const requestId = crypto.randomUUID();
+        const finish = value => {
+            clearTimeout(timer);
+            document.removeEventListener('bpa-model-session-result', receive);
+            resolve(value);
+        };
+        const receive = event => {
+            try {
+                const result = JSON.parse(event.detail);
+                if (result.requestId === requestId) finish(result.session || null);
+            } catch (_) { /* Ignore unrelated events. */ }
+        };
+        const timer = setTimeout(() => finish(null), 1500);
+        document.addEventListener('bpa-model-session-result', receive);
+        document.dispatchEvent(new CustomEvent('bpa-model-session-request',{detail:requestId}));
+    });
+}
 
 function readProjectModel(project) {
     try {
         const value = JSON.parse(localStorage.getItem(projectChoiceKey(project)) || 'null');
-        return value && value.projectId === project && projectChoiceId.test(value.modelId || '') ? value : null;
+        return value && value.projectId === project && projectChoiceId.test(value.modelId || '') &&
+            (!projectChoiceSession || value.session === projectChoiceSession) ? value : null;
     } catch (_) { return null; }
 }
 function rememberProjectModel(project, file) {
-    const value = {projectId:project, modelId:file.id, name:file.name};
+    const value = {projectId:project, modelId:file.id, name:file.name, session:projectChoiceSession};
     try { localStorage.setItem(projectChoiceKey(project), JSON.stringify(value)); return true; }
     catch (_) { return false; }
 }
@@ -131,6 +153,7 @@ async function navigateProjectModel(projectId, modelId, guid) {
     } else throw Error('Open BPA Navigator inside Connect Project Explorer or the 3D viewer.');
 }
 async function openProjectDrawing(projectId, guid) {
+    await refreshProjectChoiceSession();
     projectChoiceRequest = {projectId, guid};
     const saved = readProjectModel(projectId);
     if (!saved) { await showProjectModelChoice(projectId, guid); return; }
@@ -142,6 +165,7 @@ async function openProjectDrawing(projectId, guid) {
     }
 }
 async function confirmProjectModel() {
+    await refreshProjectChoiceSession();
     const request = projectChoiceRequest, file = projectChoiceFile;
     if (!request || !file || !projectChoiceBrowser) throw Error('Select a project model first.');
     if ((await projectChoiceBrowser.project.getProject()).id !== request.projectId ||
