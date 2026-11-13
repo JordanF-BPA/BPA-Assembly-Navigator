@@ -705,7 +705,7 @@ try {
         await api.project.getProject();
 
     log('Connected to Trimble Connect', {
-      navigatorBuild: 'assembly-labels-4',
+      navigatorBuild: 'assembly-members-3',
         projectId: project?.id,
         projectName: project?.name
     });
@@ -1112,6 +1112,21 @@ async function applyFullModelTransparency(assembly) {
         modelId
       );
 
+    // Native .tekla models can return only assembly containers from getObjects,
+    // even with recursive:true. Resolve the explicit assembly relationship too.
+    const members = new Set(selectedIds);
+    for (const rootId of rootIds) {
+      const children = await api.viewer.getHierarchyChildren(modelId, [rootId], 4, true);
+      if (!Array.isArray(children) || children.some(child => !Number.isInteger(child?.id))) {
+        throw new Error('Unexpected assembly member hierarchy response. Model appearance was not changed.');
+      }
+      for (const child of children) members.add(child.id);
+    }
+    if (![...members].some(id => !rootIds.includes(id))) {
+      throw new Error('Assembly containers were found, but their parts could not be resolved. Model appearance was not changed.');
+    }
+    selectedIds.splice(0, selectedIds.length, ...members);
+
     if (!rootIds.every(id => selectedIds.includes(id))) {
       throw new Error(
         'Selected assembly ID is missing from protected objects.'
@@ -1193,6 +1208,7 @@ async function applyFullModelTransparency(assembly) {
       modelId,
       guid,
       rootIds,
+      selectedMemberCount: selectedIds.filter(id => !rootIds.includes(id)).length,
       totalObjectCount: allIds.length,
       protectedObjectCount: protectedIds.size,
       surroundingObjectCount: surroundingIds.length,
@@ -1501,7 +1517,7 @@ async function findAssembly() {
     showAssemblyStepper(assembly);
 
     log('Assembly navigation completed', {
-      navigatorBuild: 'assembly-labels-4',
+      navigatorBuild: 'assembly-members-3',
       labelCount,
       labelIds: assemblyLabelIds.slice(),
       labelWarning: labelWarning || null,
