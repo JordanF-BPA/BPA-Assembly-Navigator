@@ -28,7 +28,10 @@ function handleModelChoiceEvent(event, args) {
 async function requestProjectBrowserToken() {
     if (projectChoiceTokenWaiter) throw Error('Model browser is already connecting.');
     return new Promise((resolve, reject) => {
+        let settled = false;
         const finish = (error, token) => {
+            if (settled) return;
+            settled = true;
             clearTimeout(timeout); projectChoiceTokenWaiter = null;
             error ? reject(error) : resolve(token);
         };
@@ -36,11 +39,14 @@ async function requestProjectBrowserToken() {
         projectChoiceTokenWaiter = token => finish(null, token);
         Promise.resolve(api.extension.requestPermission('accesstoken')).then(result => {
             if (result === 'denied') finish(Error('Allow Connect access to browse project models.'));
+            // First approval arrives as an event. Subsequent calls return the token itself.
+            else if (typeof result === 'string' && result && result !== 'pending' && result !== 'granted') finish(null, result);
         }).catch(error => finish(error));
     });
 }
 function modelFileFromEvent(args) {
-    const file = args?.data?.file;
+    // Project-extension events wrap the file; embedded explorer actions carry it directly.
+    const file = args?.data?.file || args?.data;
     return file && file.type === 'FILE' && projectChoiceId.test(file.id || '') &&
         /\.(ifc|trb|tekla)$/i.test(file.name || '') ? {id:file.id, name:file.name} : null;
 }
@@ -57,7 +63,10 @@ async function showProjectModelChoice(projectId, guid) {
 async function browseProjectModels() {
     const request = projectChoiceRequest;
     if (!request) throw Error('Open a drawing link or choose Change remembered model first.');
-    const generation = projectChoiceGeneration;
+    const generation = ++projectChoiceGeneration;
+    projectChoiceBrowser = null;
+    projectChoiceFile = null;
+    el('confirmProjectModel').disabled = true;
     el('loadModelBrowser').disabled = true;
     try {
         const token = await requestProjectBrowserToken();
@@ -71,24 +80,26 @@ async function browseProjectModels() {
         });
         const browser = await TrimbleConnectWorkspace.connect(frame, (event, args) => {
             if (generation !== projectChoiceGeneration) return;
-            if (event === 'extension.fileSelected' || event === 'extension.fileViewClicked') {
+            if (event === 'extension.fileSelected' || event === 'extension.fileViewClicked' || event === 'embed.onAction') {
                 projectChoiceFile = modelFileFromEvent(args);
                 el('confirmProjectModel').disabled = !projectChoiceFile;
                 el('modelChoiceMessage').textContent = projectChoiceFile ? 'Selected: ' + projectChoiceFile.name : 'Select one IFC, TrimBIM or Tekla model file.';
             }
-            if (event === 'extension.sessionInvalid') {
+            if (event === 'extension.sessionInvalid' || event === 'embed.session.invalid') {
                 projectChoiceFile = null;
                 el('confirmProjectModel').disabled = true;
                 el('modelChoiceMessage').textContent = 'Sign-in expired. Click Browse project models again.';
             }
         }, 30000);
         if (generation !== projectChoiceGeneration) return;
-        await browser.embed.setTokens({accessToken:token});
+        if (await browser.embed.setTokens({accessToken:token}) === false)
+            throw Error('Connect rejected the model browser session. Click Browse project models to retry.');
         const accepted = await browser.embed.initFileExplorer({projectId:request.projectId,
             enableAdd:false, enableUploadFiles:false, enableCreateFolder:false,
             enableExplorerAllProjects:false, enableExplorerKebabMenu:false, enableSelect:true,
             fileTypeFilter:['ifc','trb','tekla']});
         if (accepted === false) throw Error('Connect could not open the project model browser.');
+        if (generation !== projectChoiceGeneration) return;
         projectChoiceBrowser = browser;
     } finally { el('loadModelBrowser').disabled = false; }
 }
