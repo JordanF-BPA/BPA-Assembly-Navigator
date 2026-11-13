@@ -1130,7 +1130,9 @@ async function applyFullModelTransparency(assembly) {
     const parents =
       await api.viewer.getHierarchyParents(
         modelId,
-        rootIds
+        rootIds,
+        undefined,
+        true // Protect every ancestor, including the site/building/storey.
       );
 
     const parentIds =
@@ -1240,7 +1242,8 @@ async function applyFullModelTransparency(assembly) {
     status('Restoring selected assembly to full opacity...');
 
     await api.viewer.setObjectState(
-      selectedSelector,
+      // Restore the actual members explicitly, not only the assembly container.
+      fullTransparencySelector(modelId, selectedIds),
       {
         opacity: 1
       }
