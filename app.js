@@ -369,7 +369,7 @@ async function openDirectDrawing(command) {
         const guid = "pos-" + match[1] + "-" + match[2];
         el("guid").value = guid;
         log("Direct drawing command accepted", {guid, projectId:project.id, modelId:match[3]});
-        if (!match[3]) { await openProjectDrawing(project.id, guid); return; }
+        if (!match[3]) throw new Error("This older link has no selected model. In the Tekla Navigator plugin, choose a Connect model and click Use selected model, then regenerate and export the drawing PDF.");
         const host = await api.extension.getHost();
         if (host.name === "project") {
             if (typeof handoffDirectDrawing === "function" &&
@@ -707,7 +707,7 @@ try {
         await api.project.getProject();
 
     log('Connected to Trimble Connect', {
-      navigatorBuild: 'project-model-choice-1',
+      navigatorBuild: 'desktop-model-selection-1',
         projectId: project?.id,
         projectName: project?.name
     });
@@ -1519,7 +1519,7 @@ async function findAssembly() {
     showAssemblyStepper(assembly);
 
     log('Assembly navigation completed', {
-      navigatorBuild: 'project-model-choice-1',
+      navigatorBuild: 'desktop-model-selection-1',
       labelCount,
       labelIds: assemblyLabelIds.slice(),
       labelWarning: labelWarning || null,
@@ -1682,16 +1682,6 @@ async function attemptAutoNavigation() {
 
     autoNavigationPending = false;
     reportError(error);
-    if (!fullTransparencyActive) {
-      try {
-        const project = await api.project.getProject();
-        if (readProjectModel(project.id)?.modelId === navigationModelId) {
-          await showProjectModelChoice(project.id, incomingGuid);
-          el('modelChoiceMessage').textContent = 'The drawing could not be located in the remembered model. Choose a different model or check that it is up to date. ' + error.message;
-        }
-      } catch (choiceError) { log('Model choice recovery unavailable', choiceError.message); }
-    }
-
   } finally {
 
     autoNavigationRunning = false;
