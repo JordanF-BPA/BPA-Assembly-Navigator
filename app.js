@@ -827,6 +827,10 @@ status('Connected to Trimble Connect.');
 
     log("Pending assembly navigation completed and cleared.");
   }
+
+  // Reveal the missing-helper notice in the first viewer after startup work.
+  // This optional UI request never blocks or changes drawing navigation.
+  try { window.bpaHelperViewerReady?.(api); } catch (_) { /* Optional notice only. */ }
 }
 
 // ============================================================
