@@ -50,7 +50,7 @@
     panel.hidden = true;
     recheck.disabled = false;
   });
-  function check() {
+  function check(manual = false) {
     clearTimers();
     missing = false;
     requestId = 'helper-install-' + crypto.randomUUID();
@@ -61,13 +61,15 @@
       panel.hidden = false;
       missing = true;
       recheck.disabled = false;
-      status.textContent = 'The helper hasn’t responded in this browser. It may be missing, disabled, or need a refresh.';
+      status.textContent = manual
+        ? 'No helper connection in this open page. If you just installed or re-enabled it, refresh this entire Trimble Connect tab (F5). Check again cannot reconnect an extension to an already-open page. You do not need to download it again.'
+        : 'The helper hasn’t responded in this page. If it is already installed and enabled, refresh this entire Trimble Connect tab (F5). Otherwise, install it below.';
       void revealInViewer();
       // Keep listening so a late valid response also removes the notice.
     }, 3000);
     sendProbe();
   }
-  recheck.addEventListener('click', check);
+  recheck.addEventListener('click', () => check(true));
   window.addEventListener('pagehide', clearTimers);
   window.addEventListener('pageshow', event => { if (event.persisted) check(); });
   check();
