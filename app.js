@@ -63,7 +63,7 @@ window.bpaRefreshConnect = () => {
   if (lastCompletedNavigation && !window.bpaRefreshNavigation.remember(
       lastCompletedNavigation.projectId,lastCompletedNavigation.modelId,lastCompletedNavigation.guid))
     throw new Error('The drawing could not be saved for refresh. Allow site storage and try again.');
-  window.bpaRefreshNavigation.refresh(refreshProjectId, el('model').value);
+  return window.bpaRefreshNavigation.refresh(refreshProjectId, el('model').value);
 };
 
 let fullTransparencyBusy = false;

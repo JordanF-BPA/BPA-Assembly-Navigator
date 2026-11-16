@@ -67,14 +67,14 @@
     }, 3000);
     sendProbe();
   }
-  recheck.addEventListener('click', () => {
+  recheck.addEventListener('click', async () => {
     clearTimers();
     requestId = null;
     recheck.disabled = true;
     status.textContent = 'Refreshing Connect. Your last completed drawing selection will be restored…';
     try {
       if (typeof window.bpaRefreshConnect !== 'function') throw Error('Wait for Navigator to connect, then try again.');
-      window.bpaRefreshConnect();
+      await window.bpaRefreshConnect();
     } catch (error) {
       recheck.disabled = false;
       status.textContent = 'Connect could not refresh: ' + error.message;

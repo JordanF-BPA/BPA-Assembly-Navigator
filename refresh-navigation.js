@@ -33,11 +33,35 @@
     const saved = read(projectId,[{id:modelId}]);
     if (saved && !remember(saved.projectId,saved.modelId,saved.guid))
       throw Error('The drawing could not be saved for refresh. Allow site storage and try again.');
-    // Reading/reloading window.top.location is blocked across origins. A user
-    // click may navigate the top tab to its validated viewer URL instead. This
-    // is a full document navigation, not an SDK/SPA route change.
-    window.top.location.href = 'https://web.connect.trimble.com/projects/' +
-      encodeURIComponent(projectId) + '/viewer/3d?modelId=' + encodeURIComponent(modelId);
+    // Connect blocks top-frame navigation. Load a fresh, narrowly matched page
+    // so a newly re-enabled helper can attach and reload its own tab via tabs API.
+    return new Promise((resolve,reject) => {
+      const requestId = crypto.randomUUID();
+      const frame = document.createElement('iframe');
+      const url = new URL('https://jordanf-bpa.github.io/BPA-Assembly-Navigator/helper-refresh.html');
+      url.search = new URLSearchParams({requestId,projectId,modelId}).toString();
+      frame.hidden = true;
+      frame.title = 'BPA helper refresh connection';
+      let timer, finished = false;
+      function finish(error) {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        window.removeEventListener('message',receive);
+        frame.remove();
+        if (error) reject(error); else resolve();
+      }
+      function receive(event) {
+        if (event.origin !== url.origin || event.source !== frame.contentWindow ||
+            event.data?.type !== 'bpa-refresh-result' || event.data.requestId !== requestId) return;
+        finish(event.data.ok === true ? null : Error(event.data.error || 'The helper could not reload this tab.'));
+      }
+      window.addEventListener('message',receive);
+      timer = setTimeout(() => finish(Error('Enable BPA Navigator helper version 1.3.0 or newer, then try again. If you still have an older version, update it or press F5; your saved drawing will be restored.')),8000);
+      frame.onerror = () => finish(Error('The helper connection page could not load. Press F5 to refresh Connect and restore your saved drawing.'));
+      frame.src = url.href;
+      try { document.body.appendChild(frame); } catch (error) { finish(error); }
+    });
   }
   window.bpaRefreshNavigation = {remember,read,refresh};
 })();
