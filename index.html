@@ -8,6 +8,8 @@
   <title>BPA Assembly Navigator</title>
 
   <link rel="stylesheet" href="styles.css?v=stepper-drag-1">
+  <link rel="stylesheet" href="helper-install.css?v=1">
+  <script src="helper-install.js?v=1" defer></script>
 
   <script
     src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"
@@ -32,6 +34,28 @@
   </header>
 
   <main>
+
+    <section id="helperInstall" class="helper-install" aria-labelledby="helperInstallTitle" hidden>
+      <h2 id="helperInstallTitle">Get the BPA Navigator helper</h2>
+      <p id="helperInstallStatus" role="status">The helper hasn’t responded in this browser. It may be missing, disabled, or need a refresh.</p>
+      <p>Install it for automatic tab handling and sign-in recovery. You can keep using Navigator while you install it.</p>
+      <div class="helper-actions">
+        <a class="helper-download" href="downloads/BPA-Navigator-Chrome-Edge.zip" download="BPA-Navigator-Chrome-Edge.zip" target="_blank" rel="noopener">Download for Chrome &amp; Edge</a>
+        <button id="helperRecheck" type="button">Check again</button>
+      </div>
+      <details>
+        <summary>How to install</summary>
+        <ol>
+          <li>Download the ZIP, then right-click it in Windows and select <strong>Extract All</strong>. Keep the extracted folder somewhere permanent.</li>
+          <li>In the browser you use for drawing links, type <code>chrome://extensions</code> for Chrome or <code>edge://extensions</code> for Edge into the address bar.</li>
+          <li>Turn on <strong>Developer mode</strong>, choose <strong>Load unpacked</strong>, and select the extracted folder containing <code>manifest.json</code>.</li>
+          <li>Check that <strong>BPA Navigator direct-tab helper</strong> is enabled. Allow its requested site access, then refresh your open Trimble Connect tabs.</li>
+          <li>Open your drawing link again. Use the same browser and profile where you installed the helper.</li>
+        </ol>
+        <p>Already installed? Enable or reload the helper on the Extensions page, then refresh Connect. Downloading the ZIP alone does not install it.</p>
+      </details>
+      <p class="helper-note"><a href="helper-install.html" target="_blank" rel="noopener">Open download and installation guide in a new tab</a> if the download is blocked inside Connect.</p>
+    </section>
 
     <label for="guid">Tekla assembly GUID</label>
 
