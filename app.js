@@ -54,6 +54,17 @@ let assemblyNavigationBusy = false;
 let connectionBusy = false;
 let navigationModelId = null;
 let viewerProjectId = null;
+let refreshProjectId = null;
+let lastCompletedNavigation = null;
+window.bpaRefreshConnect = () => {
+  if (connectionBusy || assemblyNavigationBusy || autoNavigationRunning || fullTransparencyBusy)
+    throw new Error('Wait for drawing navigation to finish, then refresh and check again.');
+  if (!window.bpaRefreshNavigation) throw new Error('Refresh support has not loaded. Reload Connect with F5.');
+  if (lastCompletedNavigation && !window.bpaRefreshNavigation.remember(
+      lastCompletedNavigation.projectId,lastCompletedNavigation.modelId,lastCompletedNavigation.guid))
+    throw new Error('The drawing could not be saved for refresh. Allow site storage and try again.');
+  window.bpaRefreshNavigation.refresh(refreshProjectId, el('model').value);
+};
 
 let fullTransparencyBusy = false;
 let fullTransparencyActive = false;
@@ -756,6 +767,8 @@ status('Connected to Trimble Connect.');
 
     if (host.name === "3dviewer") {
 
+      const currentProject = await api.project.getProject();
+      refreshProjectId = currentProject.id;
       const pending = readPendingNavigation();
 
       if (pending) {
@@ -779,6 +792,17 @@ status('Connected to Trimble Connect.');
           status(
             "Pending assembly GUID received. Locating assembly..."
           );
+        }
+      }
+      // Fresh links/handoffs take precedence over this tab's previous drawing.
+      if (!autoNavigationPending && !directDrawingCommand) {
+        const saved = window.bpaRefreshNavigation?.read(currentProject.id, await api.viewer.getModels());
+        if (saved) {
+          navigationModelId = saved.modelId;
+          incomingGuid = saved.guid;
+          autoNavigationPending = true;
+          el('guid').value = saved.guid;
+          log('Restoring drawing after viewer refresh', saved);
         }
       }
     }
@@ -1521,6 +1545,15 @@ async function findAssembly() {
     if (labelWarning) log('Assembly label warning', {message: labelWarning});
 
     showAssemblyStepper(assembly);
+
+    // Retain successful navigation independently of the consumed handoff.
+    // Storage failure must not turn a successful selection into an error.
+    try {
+      const projectId = refreshProjectId || (await api.project.getProject()).id;
+      lastCompletedNavigation = {projectId, modelId, guid};
+      if (!window.bpaRefreshNavigation?.remember(projectId, modelId, guid))
+        log('Drawing selected, but refresh memory is unavailable.');
+    } catch (_) { log('Drawing selected, but refresh memory is unavailable.'); }
 
     log('Assembly navigation completed', {
       navigatorBuild: 'desktop-model-selection-1',
