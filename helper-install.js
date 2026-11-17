@@ -3,18 +3,24 @@
   const panel = document.getElementById('helperInstall');
   const status = document.getElementById('helperInstallStatus');
   const recheck = document.getElementById('helperRecheck');
+  const decline = document.getElementById('helperDecline');
+  const session = window.bpaHelperReminderSession;
+  let declinedHere = false;
+  const declined = () => declinedHere || Boolean(session?.dismissed);
   if (!panel || !status || !recheck) return;
   let requestId, retry, timeout;
   let viewerApi = null, missing = false, focusRequested = false;
   async function revealInViewer() {
-    if (!missing || !viewerApi || focusRequested) return;
+    if (!missing || !viewerApi || focusRequested || declined()) return;
+    if (session) await session.ready;
+    if (!missing || !viewerApi || focusRequested || declined()) return;
     const connectedApi = viewerApi;
     focusRequested = true;
     try {
       const host = await connectedApi.extension.getHost();
       // Never activate Project Explorer or interrupt its handoff into the viewer.
       // Recheck after awaiting: a late helper response cancels the request.
-      if (host.name !== '3dviewer' || !missing) {
+      if (host.name !== '3dviewer' || !missing || declined()) {
         focusRequested = false;
         return;
       }
@@ -34,6 +40,15 @@
     clearTimeout(retry);
     clearTimeout(timeout);
   }
+  session?.subscribe(value => {
+    declinedHere = value;
+    if (value) panel.hidden = true;
+  });
+  decline?.addEventListener('click', () => {
+    declinedHere = true;
+    panel.hidden = true;
+    void session?.dismiss();
+  });
   function sendProbe() {
     // Existing helpers (1.2.6+) answer this event after contacting their worker.
     // A null session is still a valid answer when outside a Connect frame.
@@ -58,11 +73,16 @@
     status.textContent = 'Checking for the BPA Navigator helper…';
     retry = setTimeout(sendProbe, 800);
     timeout = setTimeout(() => {
-      panel.hidden = false;
       missing = true;
       recheck.disabled = false;
       status.textContent = 'The helper hasn’t responded in this page. If it is installed and enabled, choose Refresh & check again. Otherwise, install it below.';
-      void revealInViewer();
+      const show = () => {
+        if (!missing || declined()) return;
+        panel.hidden = false;
+        void revealInViewer();
+      };
+      if (session) void session.ready.then(show);
+      else show();
       // Keep listening so a late valid response also removes the notice.
     }, 3000);
     sendProbe();
@@ -80,7 +100,7 @@
       status.textContent = 'Connect could not refresh: ' + error.message;
     }
   });
-  window.addEventListener('pagehide', clearTimers);
+  window.addEventListener('pagehide', () => { clearTimers(); missing = false; });
   window.addEventListener('pageshow', event => { if (event.persisted) check(); });
   check();
 })();

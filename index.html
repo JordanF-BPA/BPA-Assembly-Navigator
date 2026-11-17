@@ -10,7 +10,8 @@
   <link rel="stylesheet" href="styles.css?v=stepper-drag-1">
   <link rel="stylesheet" href="helper-install.css?v=1">
   <script src="refresh-navigation.js?v=2" defer></script>
-  <script src="helper-install.js?v=5" defer></script>
+  <script src="helper-reminder-session.js?v=1" defer></script>
+  <script src="helper-install.js?v=6" defer></script>
 
   <script
     src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"
@@ -44,7 +45,9 @@
       <div class="helper-actions">
         <a class="helper-download" href="downloads/BPA-Navigator-Chrome-Edge.zip" download="BPA-Navigator-Chrome-Edge.zip" target="_blank" rel="noopener">Download for Chrome &amp; Edge</a>
         <button id="helperRecheck" type="button">Refresh &amp; check again</button>
+        <button id="helperDecline" type="button">No, not this session</button>
       </div>
+      <p class="helper-note">Choose No to dismiss this reminder across your open Navigator tabs. It can appear again after all Navigator tabs are closed.</p>
       <details>
         <summary>How to install</summary>
         <ol>
